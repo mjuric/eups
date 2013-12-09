@@ -12,6 +12,7 @@ from Distrib import Distrib
 import tarball
 import pacman
 import builder
+import eupspkg
 
 class DistribFactory:
     """a factory class for creating Distrib instances
@@ -112,6 +113,7 @@ class DistribFactory:
         self.register(tarball.Distrib)
         self.register(pacman.Distrib)
         self.register(builder.Distrib)
+        self.register(eupspkg.Distrib)
 
     def _registerCustomDistribs(self):
         if self.distServer:

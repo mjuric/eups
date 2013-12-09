@@ -471,7 +471,7 @@ class ConfigurableDistribServer(DistribServer):
 
     validConfigKeys = ["DISTRIB_CLASS", "DISTRIB_SERVER_CLASS", 
                        "AVAILABLE_PRODUCTS_URL", "MANIFEST_DIR",
-                       "BUILD_URL", "MANIFEST_URL", "TABLE_URL", "LIST_URL", 
+                       "BUILD_URL", "EUPSPKG_URL", "MANIFEST_URL", "TABLE_URL", "LIST_URL", 
                        "PRODUCT_FILE_URL", "FILE_URL", "DIST_URL",
                        "MANIFEST_DIR_URL", "MANIFEST_FILE_RE", 
                        "PREFER_GENERIC", ]
