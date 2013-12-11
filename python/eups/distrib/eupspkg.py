@@ -129,6 +129,10 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
         self.fetch_type = self.options.get("fetch_type", "")
 
+        # Allow the verbosity of pkgbuild script to be set separately.
+        # Useful for debugging.
+        self.pkgbuild_verbose = self.options.get("verbose", Eups.verbose)
+
         #self.svnroot = ""
         #if self.options.has_key('svnroot'):
         #    self.svnroot = self.options['svnroot']
@@ -249,7 +253,7 @@ FLAVOR=%(flavor)s
                 fp.close()
 
             # Execute 'pkgbuild <create>'
-            eupsServer.system("cd %s && ./ups/pkgbuild -v %d %s create" % (q(pkgdir), self.Eups.verbose, q(pkginfo)))
+            eupsServer.system("cd %s && VERBOSE='%s' ./ups/pkgbuild %s create" % (q(pkgdir), self.pkgbuild_verbose, q(pkginfo)))
 
             # TODO: running pkgbuild create may result in repeating lines in pkginfo,
             #       where the last line takes presedence. To make these files nicer,
@@ -363,7 +367,7 @@ FLAVOR=%(flavor)s
 # ---- THIS IS AN EUPS-GENERATED SCRIPT
 # ----
 
-VERB=%(verbosity)s
+VERB=%(verbose)s
 
 set -x
 set -e
@@ -378,19 +382,19 @@ PKGINFO="$(pwd)/ups/pkginfo"
 %(setups)s
 
 # fetch package source
-( ./ups/pkgbuild -v $VERB "$PKGINFO" fetch ) || exit -1
+( VERBOSE=$VERB ./ups/pkgbuild "$PKGINFO" fetch ) || exit -1
 
 # prepare for build (e.g., apply platform-specific patches)
-( ./ups/pkgbuild -v $VERB "$PKGINFO" prep    ) || exit -2
+( VERBOSE=$VERB ./ups/pkgbuild "$PKGINFO" prep    ) || exit -2
 
 # setup
 setup --type=build -j -r .
 
 # build and install
-( ./ups/pkgbuild -v $VERB "$PKGINFO" build   ) || exit -3
-( ./ups/pkgbuild -v $VERB "$PKGINFO" install ) || exit -4
+( VERBOSE=$VERB ./ups/pkgbuild "$PKGINFO" build   ) || exit -3
+( VERBOSE=$VERB ./ups/pkgbuild "$PKGINFO" install ) || exit -4
 """ 			% {
-                        'verbosity' : self.Eups.verbose,
+                        'verbose' : self.pkgbuild_verbose,
                         'buildDir' : q(buildDir),
                         'eupspkg' : q(tfname),
                         'pkgdir' : q(pkgdir),

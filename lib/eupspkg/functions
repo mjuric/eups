@@ -21,13 +21,15 @@ set -e
 #   >=  0: Show messages (msg)
 #   >=  1: Show add'l informational messages (info)
 #   >=  2: Show debugging messages (debug)
+#   >=  3: Activate Bash tracing (set -x)
 
-die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild (fatal): $@" >&2; exit -1; }
-error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2; }
-warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2; }
-msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2; }
-info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2; }
-debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2; }
+# The funny '|| true' construct is there to ensure this works with 'set -e'
+die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild (fatal): $@" >&2 || true; exit -1; }
+error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2 || true; }
+warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2 || true; }
+msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2 || true; }
+info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2 || true; }
+debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2 || true; }
 
 die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
 
@@ -36,12 +38,40 @@ append_pkginfo()
 	# Append VARNAME=VARVALUE line to pkginfo file
 	# Should only be used by the 'create' verb.
 	#
-	# Usage: append_pkginfo <VARNAME> <VARVALUE>
+	# usage: append_pkginfo <VARNAME> [VARVALUE]
+	#
+	# If VARVALUE is not given $VARNAME will be evaluated
 	#
 
 	die_if_empty PKGINFO
 
-	echo $1="'""$2""'" >> "$PKGINFO"
+	if [[ $# == 1 ]]; then
+		eval VAL_="\$$1";
+	else
+		VAL_="$2"
+	fi
+
+	echo $1="'""$VAL_""'" >> "$PKGINFO"
+	
+	info "appended $1='$VAL_' to pkginfo."
+}
+
+use_parallel_jobs()
+{
+	# Tweak MAKEFLAGS and SCONSFLAGS to run at the given level of parallelism
+	#
+	# usage: use_parallel_jobs <NJOBS>
+	#
+	NJOBS=$1
+
+	# Note: If this function is called multiple times, last -j option will take presedence.
+	# Not elegant, but works.
+	export MAKEFLAGS="$SCONSFLAGS -j $NJOBS"
+	export SCONSFLAGS="$SCONSFLAGS -j $NJOBS"
+
+	info "Using $NJOBS parallel jobs."
+	debug "  MAKEFLAGS=$MAKEFLAGS"
+	debug "  SCONSFLAGS=$SCONSFLAGS"
 }
 
 make_targets()
@@ -66,6 +96,13 @@ default_create()
 	die_if_empty PRODUCT
 	die_if_empty VERSION
 
+	# safety: refuse to work in a directory containing anything other than 'ups'
+	# subdirectory. This will prevent chaos when careless users run pkgbuild create
+	# in their source directories.
+	if [[ ! -z "$(ls -A -1 | grep -v '^ups')" ]]; then
+		die "safety first: refusing to run from a directory containing anything other than 'ups' subdirectory."
+	fi
+
 	case "$FETCH_TYPE" in
 		git-archive)
 			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
@@ -85,6 +122,8 @@ default_create()
 		*)
 			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
 	esac
+	
+	msg "package contents created for $PRODUCT-$VERSION."
 }
 
 default_fetch()
@@ -163,6 +202,15 @@ default_build()
 	fi
 }
 
+install_ups()
+{
+	die_if_empty PKGINFO
+	[ ! -d ups ] && die "no 'ups' directory to copy to destination (are you running from package root?)";
+
+	mkdir -p "$PREFIX/ups"
+	cp -f -a ./ups/* "$PREFIX/ups"
+}
+
 default_install()
 {
 	# Called to install the package, and declare it to EUPS
@@ -183,8 +231,7 @@ default_install()
 		scons opt=3 prefix="$PREFIX" version="$VERSION" install
 	elif [[ -f Makefile ]]; then
 		make_targets $MAKE_INSTALL_TARGETS
-		mkdir "$PREFIX/ups"
-		cp -a ./ups/* "$PREFIX/ups"
+		install_ups
 	else
 		# just copy everything
 		mkdir -p "$PREFIX"
@@ -230,7 +277,7 @@ usage()   { default_usage "$@"; }
 #
 # Parse command line arguments
 #
-VERBOSE=0
+VERBOSE=${VERBOSE:-0}
 while getopts ":v:h" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
@@ -242,19 +289,19 @@ done
 shift $((OPTIND-1))
 
 #
-# Debug level 5 activates tracing
+# Debug level 3 activates tracing
 #
-[[ $VERBOSE -ge 2 ]] && set -x
+[[ $VERBOSE -ge 3 ]] && set -x
 
 [[ $# -ge 2 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
 
 #
 # Defaults the user (or pkginfo) can override
 #
-FETCH_TYPE=			# [|inline|git-archive|tar.gz]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
-REPOSITORY=			# URL to git repository
-MAKE_BUILD_TARGETS="all test"	# Targets for invocation of make in build phase
-MAKE_INSTALL_TARGETS="install"	# Targets for invocation of make in test phase
+FETCH_TYPE=${FETCH_TYPE:-inline}			# [|inline|git-archive|tar.gz]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
+REPOSITORY=${REPOSITORY:-}				# URL to git repository
+MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-"all test"}	# Targets for invocation of make in build phase
+MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
 
 #
 # Source the pkginfo file
@@ -263,15 +310,25 @@ PKGINFO="$1"
 shift
 if [[ $PKGINFO == auto ]]; then
 	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
-	# a working directory of a git repository
+	# a working directory of a git repository.
+	#
+	# This exists primarily to enable debugging.
 	if hash git 2>/dev/null; then
 		PRODUCT="$(basename $(git config --get remote.origin.url) .git)"
-		VERSION="$(git describe --dirty)"
+		VERSION="$(git describe --always --dirty)"
 		FLAVOR=generic
-		warn "using git heuristics to deduce \$PRODUCT and \$VERSION."
+
+		PKGINFO=$(mktemp -t pkginfo)
+		append_pkginfo PRODUCT
+		append_pkginfo VERSION
+		append_pkginfo FLAVOR
+
+		warn "temporary pkginfo file created in $PKGINFO"
+		warn "used git heuristics to deduce \$PRODUCT and \$VERSION."
 		warn "    auto-determined: PRODUCT=$PRODUCT"
 		warn "    auto-determined: VERSION=$VERSION"
 		warn "    assumed:         FLAVOR=$FLAVOR"
+
 	else
 		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
 	fi
@@ -288,11 +345,7 @@ fi
 # Try to figure out how many cores does this machine have, and tweak
 # MAKEFLAGS and SCONSFLAGS accordingly
 #
-if [[ -z $NCORES ]]; then
-	export NCORES=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
-fi
-export MAKEFLAGS="$SCONSFLAGS -j $NCORES"
-export SCONSFLAGS="$SCONSFLAGS -j $NCORES"
+use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
 
 #
 # Define frequently used computed variables
