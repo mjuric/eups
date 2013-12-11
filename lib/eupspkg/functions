@@ -63,7 +63,7 @@ default_create()
 			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" ups/pkgbuild > /dev/null ||
 				die "git-archive failed trying to check out $VERSION (do you need to tag it?)"
 			;;
-		tgz)
+		tar.gz)
 			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for SOURCE_TYPE='$SOURCE_TYPE' type."; exit -1; }
 			TARBALL="$FQNAME.tar.gz"
 			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" | gzip > "$TARBALL"
@@ -71,7 +71,7 @@ default_create()
 			;;
 		inline|"")
 			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for SOURCE_TYPE='$SOURCE_TYPE' type."; exit -1; }
-			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" | tar xf -
+			git archive --format=tar --remote="$REPO_URL" "$VERSION" | tar xf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
 		*)
 			echo "pkgbuild error: unknown source type SOURCE_TYPE='$SOURCE_TYPE'."; exit -1;
@@ -95,14 +95,12 @@ default_fetch()
 
 	case "$SOURCE_TYPE" in
 		git-archive)
-			git archive --format=tar --prefix "$BUILDDIR/" --remote="$REPO_URL" "$VERSION" | tar xz
+			git archive --format=tar  --remote="$REPO_URL" "$VERSION" | tar xf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
-		tgz)
-			tar xzf "$TARBALL"
-			[[ -d "$BUILDDIR" ]] || { echo "Extraction of '$TARBALL' did not create the '$BUILDDIR' subdirectory. Malformed archive?"; exit -1; }
+		tar.gz)
+			tar xzf "$TARBALL" --strip-components 1 --exclude "$FQNAME/ups/pkgbuild" --exclude "$FQNAME/ups/pkginfo"
 			;;
 		inline|"")
-			[[ -d "$BUILDDIR" ]] || { echo "No sources included in the archive (no '$BUILDDIR' subdirectory). Malformed archive?"; exit -1; }
 			;;
 		*)
 			echo "Unknown source '$SOURCE_TYPE'. Malformed archive?"; exit -1;
@@ -182,6 +180,8 @@ default_install()
 		# just copy everything
 		mkdir -p "$PREFIX"
 		cp -a ./ "$PREFIX"
+		# if this was a tarball install, remove the tarball
+		[ ! -z "$TARBALL" ] && rm "$PREFIX/$TARBALL"
 		msg "Copied the product into '$PREFIX'"
 	fi
 }
@@ -248,7 +248,7 @@ shift $((OPTIND-1))
 #
 # Defaults the user (or pkginfo) can override
 #
-SOURCE_TYPE=			# [|inline|git-archive|tgz]
+SOURCE_TYPE=			# [|inline|git-archive|tar.gz]
 REPO_URL=			# URL to git repository
 MAKE_BUILD_TARGETS="all test"	# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS="install"	# Targets for invocation of make in test phase
@@ -280,4 +280,3 @@ export SCONSFLAGS="$SCONSFLAGS -j $NCORES"
 #
 PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}
 FQNAME=${FQNAME:-"$PRODUCT-$VERSION"}
-BUILDDIR=${BUILDDIR:-$FQNAME}

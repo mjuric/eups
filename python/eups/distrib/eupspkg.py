@@ -222,11 +222,12 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         q = pipes.quote
         try:
             # Copy the pkgbuild script
-            pkgbuild = os.path.join(pkgdir, 'pkgbuild')
+            os.makedirs(os.path.join(pkgdir, 'ups'))
+            pkgbuild = os.path.join(pkgdir, 'ups', 'pkgbuild')
             shutil.copy2(buildFile, pkgbuild)
 
             # Write the default pkginfo contents
-            pkginfo = os.path.join(pkgdir, 'pkginfo')
+            pkginfo = os.path.join(pkgdir, 'ups', 'pkginfo')
             fp = open(pkginfo, 'a')
             try:
                 fp.write("""\
@@ -248,7 +249,7 @@ FLAVOR=%(flavor)s
                 fp.close()
 
             # Execute 'pkgbuild <create>'
-            eupsServer.system("cd %s && ./pkgbuild -v %d %s create" % (q(pkgdir), self.Eups.verbose, q(pkginfo)))
+            eupsServer.system("cd %s && ./ups/pkgbuild -v %d %s create" % (q(pkgdir), self.Eups.verbose, q(pkginfo)))
 
             # TODO: running pkgbuild create may result in repeating lines in pkginfo,
             #       where the last line takes presedence. To make these files nicer,
@@ -371,25 +372,21 @@ cd %(buildDir)s
 # Unpack the eupspkg tarball
 tar xzvf %(eupspkg)s
 cd %(pkgdir)s
-PKGINFO="$(pwd)/pkginfo"
+PKGINFO="$(pwd)/ups/pkginfo"
 
 # setup the required packages
 %(setups)s
 
 # fetch package source
-( ./pkgbuild -v $VERB "$PKGINFO" fetch ) || exit -1
+( ./ups/pkgbuild -v $VERB "$PKGINFO" fetch ) || exit -1
 
-# enter package directory. assume it's $PRODUCT-$VERSION by default,
-# but allow overrides from pkginfo via $BUILDDIR
-BUILDDIR=$( . "$PKGINFO" && echo "$BUILDDIR" )
-BUILDDIR=${BUILDDIR:-%(product)s-%(version)s}
-cd "$BUILDDIR"
-
-# run the build sequence
+# prepare for build (e.g., apply platform-specific patches)
 ( ./ups/pkgbuild -v $VERB "$PKGINFO" prep    ) || exit -2
 
+# setup
 setup --type=build -j -r .
 
+# build and install
 ( ./ups/pkgbuild -v $VERB "$PKGINFO" build   ) || exit -3
 ( ./ups/pkgbuild -v $VERB "$PKGINFO" install ) || exit -4
 """ 			% {
@@ -420,12 +417,12 @@ setup --type=build -j -r .
                 eupsServer.system(cmd, self.Eups.noaction)
 
                 # Copy the build log into the product install directory. It's useful to keep around.
-                installDir = os.path.join(self.Eups.path[0], self.Eups.flavor, product, version)
-                if os.path.isdir(installDir):
-                    shutil.copy2(logfile, installDir)
-                    print >> self.log, "Build log file copied to %s/%s" % (installDir, os.path.basename(logfile))
+                installDirUps = os.path.join(self.Eups.path[0], self.Eups.flavor, product, version, 'ups')
+                if os.path.isdir(installDirUps):
+                    shutil.copy2(logfile, installDirUps)
+                    print >> self.log, "Build log file copied to %s/%s" % (installDirUps, os.path.basename(logfile))
                 else:
-                    print >> self.log, "Build log file not copied as %s does not exist (this shouldn't happen)." % installDir
+                    print >> self.log, "Build log file not copied as %s does not exist (this shouldn't happen)." % installDirUps
 
         except OSError, e:
             if self.verbose >= 0 and os.path.exists(logfile):
