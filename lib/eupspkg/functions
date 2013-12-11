@@ -1,0 +1,283 @@
+#!/bin/bash -- just to enable syntax highlighting --
+#
+# EupsPkg Distrib Mechanism Function Library
+#
+# Defines utility functions, default implementations of pkgbuild verbs, and
+# performs common initialization.
+#
+# Should be sourced early on in pkgbuild scripts.
+#
+
+set -e
+
+##################### ---- UTILITY FUNCTIONS ---- #####################
+
+append_pkginfo()
+{
+	# Append VARNAME=VARVALUE line to pkginfo file
+	# Should only be used by the 'create' verb.
+	#
+	# Usage: append_pkginfo <VARNAME> <VARVALUE>
+	#
+
+	die_if_empty PKGINFO
+
+	echo $1="'""$2""'" >> "$PKGINFO"
+}
+
+error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2; }
+warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2; }
+msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2; }
+info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2; }
+debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2; }
+
+die()   { error "$@"; exit -1; }
+die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
+
+
+make_targets()
+{
+	# Run "make <target>" for each argument, with PRODUCT and VERSION exported
+	for target in "$@"; do
+		PRODUCT="$PRODUCT" VERSION="$VERSION" make $target
+	done
+}
+
+##################### ---- DEFAULT VERB IMPL ---- #####################
+
+default_create()
+{
+	# Called to publish the package to the distribution server
+	# Should generate all the files that are needed for cloning
+	# --
+	# CWD: Called from $pkgroot
+	# Env: Nothing guaranteed to be setup-ed
+	#
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	case "$SOURCE_TYPE" in
+		git-archive)
+			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for SOURCE_TYPE='$SOURCE_TYPE' type."; exit -1; }
+			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" ups/pkgbuild > /dev/null ||
+				die "git-archive failed trying to check out $VERSION (do you need to tag it?)"
+			;;
+		tgz)
+			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for SOURCE_TYPE='$SOURCE_TYPE' type."; exit -1; }
+			TARBALL="$FQNAME.tar.gz"
+			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" | gzip > "$TARBALL"
+			append_pkginfo TARBALL "$TARBALL"
+			;;
+		inline|"")
+			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for SOURCE_TYPE='$SOURCE_TYPE' type."; exit -1; }
+			git archive --format=tar --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" | tar xf -
+			;;
+		*)
+			echo "pkgbuild error: unknown source type SOURCE_TYPE='$SOURCE_TYPE'."; exit -1;
+	esac
+}
+
+default_fetch()
+{
+	# Should obtain the source and unpack it so it's the same
+	# as when it was checked out from git. The source should be unpacked to
+	# $pkgroot/build
+	# --
+	# Called by 'eups distrib install <pkgname> <version>'
+	# --
+	# CWD: Called from $pkgroot
+	# Env: Called in environment with setup-ed dependencies, but not the package itself
+	#
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	case "$SOURCE_TYPE" in
+		git-archive)
+			git archive --format=tar --prefix "$BUILDDIR/" --remote="$REPO_URL" "$VERSION" | tar xz
+			;;
+		tgz)
+			tar xzf "$TARBALL"
+			[[ -d "$BUILDDIR" ]] || { echo "Extraction of '$TARBALL' did not create the '$BUILDDIR' subdirectory. Malformed archive?"; exit -1; }
+			;;
+		inline|"")
+			[[ -d "$BUILDDIR" ]] || { echo "No sources included in the archive (no '$BUILDDIR' subdirectory). Malformed archive?"; exit -1; }
+			;;
+		*)
+			echo "Unknown source '$SOURCE_TYPE'. Malformed archive?"; exit -1;
+			;;
+	esac
+}
+
+default_prep()
+{
+	# Should apply any patches and prepare the code to be built using build()
+	# --
+	# Called by 'eups distrib install <pkgname> <version>'
+	# Caller: buildbot, to prep the package for building
+	# --
+	# CWD: Called from $builddir
+	# Env: Called in environment with setup-ed dependencies, but not the package itself
+	# --
+	# Typical override:
+	#   apply applicable patches from $sourcedir/patches, depending
+        #   on platform we're being compiled on.
+        :
+}
+
+default_build()
+{
+	# Called to build the package.
+	# --
+	# Caller: 'eups distrib install <pkgname> <version>'
+	# Caller: buildbot, to build the package
+	# --
+	# CWD: Called from $builddir
+	# Env: Called in environment with setup-ed dependencies, including self
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	echo PREFIX="$PREFIX"
+
+	#
+	# Attempt to autodetect the build system
+	#
+	if [[ -f SConstruct ]]; then
+		scons opt=3 prefix="$PREFIX" version="$VERSION" build
+	elif [[ -f configure ]]; then
+		./configure --prefix "$PREFIX"
+		make_targets $MAKE_BUILD_TARGETS
+	elif [[ -f Makefile ]]; then
+		make_targets $MAKE_BUILD_TARGETS
+	else
+		msg "No build system detected; assuming no build needed."
+	fi
+}
+
+default_install()
+{
+	# Called to install the package, and declare it to EUPS
+	# --
+	# Caller: 'eups distrib install <pkgname> <version>'
+	# Caller: buildbot, to build the package
+	# --
+	# CWD: Called from $builddir
+	# Env: Called in environment with setup-ed dependencies, including self
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	#
+	# Attempt to autodetect the build system
+	#
+	if [[ -f SConstruct ]]; then
+		scons opt=3 prefix="$PREFIX" version="$VERSION" install
+	elif [[ -f Makefile ]]; then
+		make_targets $MAKE_INSTALL_TARGETS
+		mkdir "$PREFIX/ups"
+		cp -a ./ups/* "$PREFIX/ups"
+	else
+		# just copy everything
+		mkdir -p "$PREFIX"
+		cp -a ./ "$PREFIX"
+		msg "Copied the product into '$PREFIX'"
+	fi
+}
+
+default_usage()
+{
+	cat <<-"EOF"
+		pkgbuild -- EupsPkg builder script
+
+		usage: pkgbuild [-h] [-v verbosity] pkginfo verb
+
+		  optinfo : location of pkginfo or 'none' to skip
+		  verb    : one of create, fetch, prep, build, install
+
+		  v : set verbosity level (-2 through +2, default 0)
+		  h : show usage instructions
+
+EOF
+}
+
+#
+# Define default verb implementations
+#
+create()  { default_create "$@"; }
+fetch()   { default_fetch "$@"; }
+prep()    { default_prep "$@"; }
+build()   { default_build "$@"; }
+install() { default_install "$@"; }
+usage()   { default_usage "$@"; }
+
+##################### ---- INITIALIZATION ---- #####################
+
+#
+# Verbosity levels:
+#
+#   -2: Show errors
+#   -1: Show warnings
+#    0: Show messages
+#    1: Show informational messages
+#    2: Show debugging messages
+
+#
+# Parse command line arguments
+#
+VERBOSE=0
+NOPKGINFO=0
+while getopts ":v:h" opt; do
+	case $opt in
+		v) VERBOSE="$OPTARG" ;;
+		h) usage; exit; ;;
+		\?) die "Invalid option: -$OPTARG" ;;
+		:) die "Option -$OPTARG requires an argument." ;;
+	esac
+done
+shift $((OPTIND-1))
+
+#
+# Debug level 5 activates tracing
+#
+[[ $VERBOSE -ge 2 ]] && set -x
+
+[[ $# -ge 2 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
+
+#
+# Defaults the user (or pkginfo) can override
+#
+SOURCE_TYPE=			# [|inline|git-archive|tgz]
+REPO_URL=			# URL to git repository
+MAKE_BUILD_TARGETS="all test"	# Targets for invocation of make in build phase
+MAKE_INSTALL_TARGETS="install"	# Targets for invocation of make in test phase
+
+#
+# Source the pkginfo file
+#
+PKGINFO="$1"
+shift
+[[ "$PKGINFO" != none ]] && { . "$PKGINFO"; } || { PKGINFO=; warn "pkginfo argument set to 'none'; not sourcing. make sure you've defined VERSION and PRODUCT yourself."; }
+
+# Check for basic sanity. Don't die, as this may just be a power user
+# writing a very weird pkgbuild script.
+[[ -z "$VERSION" ]] && warn "VERSION not defined. hope you know what you're doing."
+[[ -z "$PRODUCT" ]] && warn "PRODUCT not defined. hope you know what you're doing."
+
+#
+# Try to figure out how many cores does this machine have, and tweak
+# MAKEFLAGS and SCONSFLAGS accordingly
+#
+if [[ -z $NCORES ]]; then
+	export NCORES=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
+fi
+export MAKEFLAGS="$SCONSFLAGS -j $NCORES"
+export SCONSFLAGS="$SCONSFLAGS -j $NCORES"
+
+#
+# Define frequently used computed variables
+#
+PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}
+FQNAME=${FQNAME:-"$PRODUCT-$VERSION"}
+BUILDDIR=${BUILDDIR:-$FQNAME}

@@ -73,6 +73,8 @@ class Distrib(eupsDistrib.DefaultDistrib):
              unzip them (if needed) into $pkgdir/build
         - 'pkgbuild prep' will be called from $pkgdir.
              The default implementation does nothing.
+        - the package will be setup-ed at this point with
+             'setup --type=build -j -r .', executed in $pkgdir/build
         - 'pkgbuild build' will be called in $pkgdir.
              The default implementation runs:
                scons opt=3 prefix=$PREFIX version=$VERSION build
@@ -124,6 +126,8 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
         self.nobuild = self.options.get("nobuild", False)
         self.noclean = self.options.get("noclean", False)
+
+        self.source_type = self.options.get("source_type", "")
 
         #self.svnroot = ""
         #if self.options.has_key('svnroot'):
@@ -232,14 +236,23 @@ FLAVOR=%(flavor)s
 """ 			% { 
                         'product' : q(product),
                         'version' : q(version),
-                        'flavor'  : q(flavor)
+                        'flavor'  : q(flavor),
                         }
                 )
+
+                # Set the source type, if it's been passed on the command line
+                if self.source_type:
+                    fp.write("SOURCE_TYPE=%s\n" % self.source_type)
+
             finally:
                 fp.close()
 
             # Execute 'pkgbuild <create>'
-            eupsServer.system("cd %s && ./pkgbuild create" % q(pkgdir))
+            eupsServer.system("cd %s && ./pkgbuild -v %d %s create" % (q(pkgdir), self.Eups.verbose, q(pkginfo)))
+
+            # TODO: running pkgbuild create may result in repeating lines in pkginfo,
+            #       where the last line takes presedence. To make these files nicer,
+            #       write code which will only keep the last definition.
 
             # Tarball the result and copy it to $serverDir/products
             productsDir = os.path.join(serverDir, "products")
@@ -340,13 +353,6 @@ FLAVOR=%(flavor)s
 
         q = pipes.quote
         try:
-            # Create build driver script
-            eups_path_export = "# No $EUPS_PATH defined in the original environment, so not re-exporting any."
-            try:
-                eups_path_export = "export EUPS_PATH=%s" % q(os.environ["EUPS_PATH"])
-            except KeyError:
-                pass
-
             buildscript = os.path.join(buildDir, "build.sh")
             fp = open(buildscript, 'a')
             try:
@@ -356,7 +362,7 @@ FLAVOR=%(flavor)s
 # ---- THIS IS AN EUPS-GENERATED SCRIPT
 # ----
 
-%(eups_path_export)s
+VERB=%(verbosity)s
 
 set -x
 set -e
@@ -365,28 +371,35 @@ cd %(buildDir)s
 # Unpack the eupspkg tarball
 tar xzvf %(eupspkg)s
 cd %(pkgdir)s
+PKGINFO="$(pwd)/pkginfo"
 
 # setup the required packages
 %(setups)s
 
 # fetch package source
-( ./pkgbuild fetch ) || exit -1
-( ./pkgbuild prep ) || exit -2
+( ./pkgbuild -v $VERB "$PKGINFO" fetch ) || exit -1
 
-# setup package
-pushd build
+# enter package directory. assume it's $PRODUCT-$VERSION by default,
+# but allow overrides from pkginfo via $BUILDDIR
+BUILDDIR=$( . "$PKGINFO" && echo "$BUILDDIR" )
+BUILDDIR=${BUILDDIR:-%(product)s-%(version)s}
+cd "$BUILDDIR"
+
+# run the build sequence
+( ./ups/pkgbuild -v $VERB "$PKGINFO" prep    ) || exit -2
+
 setup --type=build -j -r .
-popd
 
-# run the build
-( ./pkgbuild build ) || exit -3
-( ./pkgbuild install ) || exit -4
+( ./ups/pkgbuild -v $VERB "$PKGINFO" build   ) || exit -3
+( ./ups/pkgbuild -v $VERB "$PKGINFO" install ) || exit -4
 """ 			% {
-                        'eups_path_export' : eups_path_export,
+                        'verbosity' : self.Eups.verbose,
                         'buildDir' : q(buildDir),
                         'eupspkg' : q(tfname),
                         'pkgdir' : q(pkgdir),
-                        'setups' : "\n".join(setups)
+                        'setups' : "\n".join(setups),
+                        'product' : q(product),
+                        'version' : q(version),
                       }
                 )
             finally:
@@ -405,6 +418,15 @@ popd
             cmd = "(%s) >> %s 2>&1 " % (q(buildscript), q(logfile))
             if not self.nobuild:
                 eupsServer.system(cmd, self.Eups.noaction)
+
+                # Copy the build log into the product install directory. It's useful to keep around.
+                installDir = os.path.join(self.Eups.path[0], self.Eups.flavor, product, version)
+                if os.path.isdir(installDir):
+                    shutil.copy2(logfile, installDir)
+                    print >> self.log, "Build log file copied to %s/%s" % (installDir, os.path.basename(logfile))
+                else:
+                    print >> self.log, "Build log file not copied as %s does not exist (this shouldn't happen)." % installDir
+
         except OSError, e:
             if self.verbose >= 0 and os.path.exists(logfile):
                 try: 
