@@ -39,7 +39,7 @@ make_targets()
 {
 	# Run "make <target>" for each argument, with PRODUCT and VERSION exported
 	for target in "$@"; do
-		PRODUCT="$PRODUCT" VERSION="$VERSION" make $target
+		PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make $target
 	done
 }
 
@@ -199,6 +199,10 @@ default_usage()
 		  v : set verbosity level (-2 through +2, default 0)
 		  h : show usage instructions
 
+		If pkginfo is set to 'auto', a crude auto-detection
+		algorithm will be employed to deduce PRODUCT and VERSION
+		using git (this should _never_ be used to create packages).
+
 EOF
 }
 
@@ -227,7 +231,6 @@ usage()   { default_usage "$@"; }
 # Parse command line arguments
 #
 VERBOSE=0
-NOPKGINFO=0
 while getopts ":v:h" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
@@ -258,7 +261,23 @@ MAKE_INSTALL_TARGETS="install"	# Targets for invocation of make in test phase
 #
 PKGINFO="$1"
 shift
-[[ "$PKGINFO" != none ]] && { . "$PKGINFO"; } || { PKGINFO=; warn "pkginfo argument set to 'none'; not sourcing. make sure you've defined VERSION and PRODUCT yourself."; }
+if [[ $PKGINFO == auto ]]; then
+	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
+	# a working directory of a git repository
+	if hash git 2>/dev/null; then
+		PRODUCT="$(basename $(git config --get remote.origin.url) .git)"
+		VERSION="$(git describe --dirty)"
+		FLAVOR=generic
+		warn "using git heuristics to deduce \$PRODUCT and \$VERSION."
+		warn "    auto-determined: PRODUCT=$PRODUCT"
+		warn "    auto-determined: VERSION=$VERSION"
+		warn "    assumed:         FLAVOR=$FLAVOR"
+	else
+		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
+	fi
+else
+	. "$PKGINFO"
+fi
 
 # Check for basic sanity. Don't die, as this may just be a power user
 # writing a very weird pkgbuild script.
