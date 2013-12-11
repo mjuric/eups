@@ -59,19 +59,19 @@ default_create()
 
 	case "$FETCH_TYPE" in
 		git-archive)
-			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
-			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" ups/pkgbuild > /dev/null ||
+			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPOSITORY" "$VERSION" ups/pkgbuild > /dev/null ||
 				die "git-archive failed trying to check out $VERSION (do you need to tag it?)"
 			;;
 		tar.gz)
-			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
 			TARBALL="$FQNAME.tar.gz"
-			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPO_URL" "$VERSION" > "$TARBALL"
+			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPOSITORY" "$VERSION" --output "$TARBALL"
 			append_pkginfo TARBALL "$TARBALL"
 			;;
 		inline|"")
-			[[ ! -z "$REPO_URL" ]] || { echo "pkgbuild error: $REPO_URL must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
-			git archive --format=tar.gz --remote="$REPO_URL" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
+			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
 		*)
 			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
@@ -95,7 +95,7 @@ default_fetch()
 
 	case "$FETCH_TYPE" in
 		git-archive)
-			git archive --format=tar.gz  --remote="$REPO_URL" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
+			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
 		tar.gz)
 			tar xzf "$TARBALL" --strip-components 1 --exclude "$FQNAME/ups/pkgbuild" --exclude "$FQNAME/ups/pkginfo"
@@ -249,7 +249,7 @@ shift $((OPTIND-1))
 # Defaults the user (or pkginfo) can override
 #
 FETCH_TYPE=			# [|inline|git-archive|tar.gz]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
-REPO_URL=			# URL to git repository
+REPOSITORY=			# URL to git repository
 MAKE_BUILD_TARGETS="all test"	# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS="install"	# Targets for invocation of make in test phase
 
