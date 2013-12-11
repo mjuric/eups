@@ -12,6 +12,25 @@ set -e
 
 ##################### ---- UTILITY FUNCTIONS ---- #####################
 
+#
+# Verbosity levels:
+#
+#   >= -3: Show fatal errors (fatal)
+#   >= -2: Show errors (error)
+#   >= -1: Show warnings (warn)
+#   >=  0: Show messages (msg)
+#   >=  1: Show add'l informational messages (info)
+#   >=  2: Show debugging messages (debug)
+
+die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild (fatal): $@" >&2; exit -1; }
+error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2; }
+warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2; }
+msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2; }
+info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2; }
+debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2; }
+
+die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
+
 append_pkginfo()
 {
 	# Append VARNAME=VARVALUE line to pkginfo file
@@ -24,16 +43,6 @@ append_pkginfo()
 
 	echo $1="'""$2""'" >> "$PKGINFO"
 }
-
-error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2; }
-warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2; }
-msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2; }
-info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2; }
-debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2; }
-
-die()   { error "$@"; exit -1; }
-die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
-
 
 make_targets()
 {
@@ -217,15 +226,6 @@ install() { default_install "$@"; }
 usage()   { default_usage "$@"; }
 
 ##################### ---- INITIALIZATION ---- #####################
-
-#
-# Verbosity levels:
-#
-#   -2: Show errors
-#   -1: Show warnings
-#    0: Show messages
-#    1: Show informational messages
-#    2: Show debugging messages
 
 #
 # Parse command line arguments
