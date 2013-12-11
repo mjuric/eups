@@ -76,10 +76,37 @@ use_parallel_jobs()
 
 make_targets()
 {
-	# Run "make <target>" for each argument, with PRODUCT and VERSION exported
-	for target in "$@"; do
-		PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make $target
-	done
+	# If called w/o arguments, call make w/o a target
+	if [[ $# == 0 ]]; then
+		PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make
+	else
+		# Run "make <target>" for each argument, with PRODUCT and VERSION exported
+		for target in "$@"; do
+			PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make $target
+		done
+	fi
+}
+
+version_to_git_rev()
+{
+	# Parse the version into a git revision that can be pulled with git-archive
+	#
+	# Assume the versions are of the form:
+	#
+	#    <version>+gSHA1[+more_stuff]
+	#
+	# If the version can't be parsed, return it as-is (it may be a tag).
+	#
+	# Defines: GITREV
+	#
+
+	GITREV=$(echo $VERSION | cut -d+ -f 2)
+
+	if [[ "${GITREV:0:1}" != "g" ]]; then
+		GITREV="$VERSION"
+	else
+		GITREV=${GITREV:1}
+	fi
 }
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
@@ -104,21 +131,59 @@ default_create()
 		die "safety first: refusing to run from a non-empty directory."
 	fi
 
+	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+
+	version_to_git_rev
+
 	case "$FETCH_TYPE" in
+		git)
+			# Use git clone to extract ups/pkgbuild. Store the SHA1 in $PKGINFO
+			git clone -q "$REPOSITORY" tmp
+			(cd tmp && git checkout -q $GITREV)
+
+			SHA1=$(cd tmp && git rev-parse HEAD)
+			append_pkginfo SHA1
+
+			mkdir ups
+			mv tmp/ups/pkgbuild ups
+
+			rm -rf tmp
+			;;
 		git-archive)
-			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+			# Extract ups/pkgbuild using git-archive
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
 			;;
 		tar.gz)
-			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+			# Generate a tarball using git-archive, falling back to git-clone in case of failure
 			TARBALL="$FQNAME.tar.gz"
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" --prefix "$FQNAME/" --output "$TARBALL"
-			append_pkginfo TARBALL "$TARBALL"
+
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild 2>/dev/null | tar xzf -
+			if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+				git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" --prefix "$FQNAME/" --output "$TARBALL"
+				msg created the tarball in '$TARBALL' using git-archive.
+			else
+				git clone -q "$REPOSITORY" "$FQNAME"
+				(cd "$FQNAME" && git checkout -q $GITREV)
+
+				mkdir ups
+				cp -a "$FQNAME/ups/pkgbuild" ups
+
+				tar czf "$TARBALL" --exclude "$FQNAME"/.git "$FQNAME" 
+				rm -rf "$FQNAME"
+
+				msg created the tarball in '$TARBALL' using git-clone.
+			fi
+
+			append_pkginfo TARBALL
 			;;
 		inline|"")
-			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" | tar xzf -
+			# Extract the full source using git-archive, falling back to git-clone in case of failure.
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | tar xzf -
+			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+				git clone "$REPOSITORY" .
+				git checkout -q $GITREV
+				rm -rf .git
+			fi
 			;;
 		*)
 			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
@@ -145,7 +210,21 @@ default_fetch()
 	die_if_empty PRODUCT
 	die_if_empty VERSION
 
+	version_to_git_rev
+
 	case "$FETCH_TYPE" in
+		git)
+			# Obtain the source from a git repository
+			die_if_empty SHA1
+
+			git clone -q "$REPOSITORY" tmp
+			(cd tmp && git checkout -q $SHA1)
+
+			rm -rf tmp/.git
+
+			find tmp -depth 1 -exec mv {} . \;
+			rmdir tmp
+			;;
 		git-archive)
 			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
@@ -195,24 +274,35 @@ default_build()
 	# Attempt to autodetect the build system
 	#
 	if [[ -f SConstruct ]]; then
-		scons opt=3 prefix="$PREFIX" version="$VERSION" build
+		scons opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
-		./configure --prefix "$PREFIX"
+		./configure --prefix "$PREFIX" $CONFIGURE_OPTIONS
 		make_targets $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile ]]; then
 		make_targets $MAKE_BUILD_TARGETS
+	elif [[ -f setup.py ]]; then
+		python setup.py build
 	else
-		msg "No build system detected; assuming no build needed."
+		msg "no build system detected; assuming no build needed."
 	fi
 }
 
 install_ups()
 {
+	# Copy the contents of ups/ to $PREFIX/ups and expand the table files
+
 	die_if_empty PKGINFO
 	[ ! -d ups ] && die "no 'ups' directory to copy to destination (are you running from package root?)";
 
 	mkdir -p "$PREFIX/ups"
 	cp -f -a ./ups/* "$PREFIX/ups"
+
+	# Expand the table file, if any
+	if [[ -f "$PREFIX/ups/$PRODUCT.table" ]]; then
+		eups expandtable -i -W '^(?!LOCAL:)' "$PREFIX/ups/$PRODUCT.table"
+	else
+		msg "no table file to expand (looked for '$PREFIX/ups/$PRODUCT.table')".
+	fi
 }
 
 default_install()
@@ -236,6 +326,9 @@ default_install()
 	elif [[ -f Makefile ]]; then
 		make_targets $MAKE_INSTALL_TARGETS
 		install_ups
+	elif [[ -f setup.py ]]; then
+		python setup.py install $PYSETUP_INSTALL_OPTIONS
+		install_ups
 	else
 		# just copy everything
 		mkdir -p "$PREFIX"
@@ -244,6 +337,24 @@ default_install()
 		[ ! -z "$TARBALL" ] && rm "$PREFIX/$TARBALL"
 		msg "Copied the product into '$PREFIX'"
 	fi
+}
+
+eups_declare()
+{
+	# Make the package known to EUPS
+	#
+	# NOTE: This function is not a part of the "official" API; it's here just
+	# to ease debugging.
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	# Sanity checks
+	if [[ ! -d "$PREFIX/ups" ]]; then
+		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
+	fi
+
+	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
 }
 
 default_usage()
@@ -304,8 +415,9 @@ shift $((OPTIND-1))
 #
 FETCH_TYPE=${FETCH_TYPE:-inline}			# [|inline|git-archive|tar.gz]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
-MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-"all test"}	# Targets for invocation of make in build phase
+MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
+CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note that --prefix is passed separately.
 
 #
 # Source the pkginfo file
@@ -318,9 +430,29 @@ if [[ $PKGINFO == auto ]]; then
 	#
 	# This exists primarily to enable debugging.
 	if hash git 2>/dev/null; then
-		PRODUCT="$(basename $(git config --get remote.origin.url) .git)"
-		VERSION="$(git describe --always --dirty)"
+		warn "using git heuristics to deduce pkginfo contents."
+
+		REMOTE=$(git config --get remote.origin.url || true)
+		if [[ -z "$REMOTE" ]]; then
+			die "No git remote named 'origin', or git error.";
+		fi
+
+		PRODUCT="$(basename "$REMOTE" .git)"
 		FLAVOR=generic
+
+		# Construct an EUPS-friendly version string based on git info
+		GD="$(git describe --long 2>/dev/null)"
+		if [ -z "$GD" ]; then
+			# no tags
+			GD="unknown-0-g$(git describe --long --always)"
+		fi
+		if [[ "$(git describe --always)" != "$(git describe --always --dirty)" ]]; then
+			DIRTY="_dirty"
+		fi
+		NF=$(echo "$GD" | grep -o '-' | wc -l)
+		SHA=$(echo "$GD" | cut -d- -f$(($NF+1)))
+		TAG=$(echo "$GD" | cut -d- -f1-$(($NF-1)))
+		VERSION="$TAG+$SHA$DIRTY"
 
 		PKGINFO=$(mktemp -t pkginfo)
 		append_pkginfo PRODUCT
@@ -328,7 +460,6 @@ if [[ $PKGINFO == auto ]]; then
 		append_pkginfo FLAVOR
 
 		warn "temporary pkginfo file created in $PKGINFO"
-		warn "used git heuristics to deduce \$PRODUCT and \$VERSION."
 		warn "    auto-determined: PRODUCT=$PRODUCT"
 		warn "    auto-determined: VERSION=$VERSION"
 		warn "    assumed:         FLAVOR=$FLAVOR"
@@ -352,7 +483,9 @@ fi
 use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
 
 #
-# Define frequently used computed variables
+# Defaults the user can further override in pkgbuild
 #
 PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}
 FQNAME=${FQNAME:-"$PRODUCT-$VERSION"}
+
+PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}	# Options passed to setup.py install. Note that --prefix is NOT passed separately!
