@@ -127,7 +127,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
         self.nobuild = self.options.get("nobuild", False)
         self.noclean = self.options.get("noclean", False)
 
-        self.source_type = self.options.get("source_type", "")
+        self.fetch_type = self.options.get("fetch_type", "")
 
         #self.svnroot = ""
         #if self.options.has_key('svnroot'):
@@ -242,8 +242,8 @@ FLAVOR=%(flavor)s
                 )
 
                 # Set the source type, if it's been passed on the command line
-                if self.source_type:
-                    fp.write("SOURCE_TYPE=%s\n" % self.source_type)
+                if self.fetch_type:
+                    fp.write("FETCH_TYPE=%s\n" % self.fetch_type)
 
             finally:
                 fp.close()
