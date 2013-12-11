@@ -131,12 +131,8 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
         # Allow the verbosity of pkgbuild script to be set separately.
         # Useful for debugging.
+        # PROBLEM: this only seems to work for 'eups distrib create'
         self.pkgbuild_verbose = self.options.get("verbose", Eups.verbose)
-
-        #self.svnroot = ""
-        #if self.options.has_key('svnroot'):
-        #    self.svnroot = self.options['svnroot']
-
 
 
     # @staticmethod   # requires python 2.4
@@ -215,8 +211,8 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         distid = "eupspkg:%s-%s.eupspkg" % (product, version)
 
         (baseDir, productDir) = self.getProductInstDir(product, version, flavor)
-        buildFile = os.path.join(baseDir, productDir, "ups", "pkgbuild")
-        if not os.path.exists(buildFile):
+        pkgbuild = os.path.join(baseDir, productDir, "ups", "pkgbuild")
+        if not os.path.exists(pkgbuild):
             # Use the defalt build file
             raise Exception("TODO: Implement default pkgbuild file facility.")
 
@@ -225,39 +221,20 @@ EUPSPKG_URL = %(base)s/products/%(path)s
 
         q = pipes.quote
         try:
-            # Copy the pkgbuild script
-            os.makedirs(os.path.join(pkgdir, 'ups'))
-            pkgbuild = os.path.join(pkgdir, 'ups', 'pkgbuild')
-            shutil.copy2(buildFile, pkgbuild)
-
-            # Write the default pkginfo contents
-            pkginfo = os.path.join(pkgdir, 'ups', 'pkginfo')
-            fp = open(pkginfo, 'a')
+            # Create the default pkginfo contents
+            (fd, pkginfo) = tempfile.mkstemp(prefix='pkginfo.')
+            fp = os.fdopen(fd, 'w')
             try:
-                fp.write("""\
-PRODUCT=%(product)s
-VERSION=%(version)s
-FLAVOR=%(flavor)s
-""" 			% { 
-                        'product' : q(product),
-                        'version' : q(version),
-                        'flavor'  : q(flavor),
-                        }
-                )
-
-                # Set the source type, if it's been passed on the command line
+                fp.write("PRODUCT=%s\n" % q(product))
+                fp.write("VERSION=%s\n" % q(version))
+                fp.write("FLAVOR=%s\n"  % q(flavor))
                 if self.fetch_type:
-                    fp.write("FETCH_TYPE=%s\n" % self.fetch_type)
-
+                    fp.write("FETCH_TYPE=%s\n" % q(self.fetch_type))
             finally:
                 fp.close()
 
             # Execute 'pkgbuild <create>'
-            eupsServer.system("cd %s && VERBOSE='%s' ./ups/pkgbuild %s create" % (q(pkgdir), self.pkgbuild_verbose, q(pkginfo)))
-
-            # TODO: running pkgbuild create may result in repeating lines in pkginfo,
-            #       where the last line takes presedence. To make these files nicer,
-            #       write code which will only keep the last definition.
+            eupsServer.system("cd %s && VERBOSE=%s %s %s create" % (q(pkgdir), q(self.pkgbuild_verbose), q(pkgbuild), q(pkginfo)))
 
             # Tarball the result and copy it to $serverDir/products
             productsDir = os.path.join(serverDir, "products")

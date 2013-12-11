@@ -95,34 +95,38 @@ default_create()
 
 	die_if_empty PRODUCT
 	die_if_empty VERSION
+	die_if_empty PKGINFO
 
 	# safety: refuse to work in a directory containing anything other than 'ups'
 	# subdirectory. This will prevent chaos when careless users run pkgbuild create
 	# in their source directories.
-	if [[ ! -z "$(ls -A -1 | grep -v '^ups')" ]]; then
-		die "safety first: refusing to run from a directory containing anything other than 'ups' subdirectory."
+	if [[ ! -z "$(ls -A)" ]]; then
+		die "safety first: refusing to run from a non-empty directory."
 	fi
 
 	case "$FETCH_TYPE" in
 		git-archive)
 			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
-			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPOSITORY" "$VERSION" ups/pkgbuild > /dev/null ||
-				die "git-archive failed trying to check out $VERSION (do you need to tag it?)"
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
 			;;
 		tar.gz)
 			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
 			TARBALL="$FQNAME.tar.gz"
-			git archive --format=tar.gz --prefix "$FQNAME/" --remote="$REPOSITORY" "$VERSION" --output "$TARBALL"
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" --prefix "$FQNAME/" --output "$TARBALL"
 			append_pkginfo TARBALL "$TARBALL"
 			;;
 		inline|"")
 			[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" | tar xzf -
 			;;
 		*)
 			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
 	esac
-	
+
+	cp "$PKGINFO" ups/pkginfo
+	chmod +r ups/pkginfo
+
 	msg "package contents created for $PRODUCT-$VERSION."
 }
 
