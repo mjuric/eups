@@ -422,6 +422,27 @@ install_ups()
 	fi
 }
 
+clean_old_install()
+{
+	#
+	# Remove any existing content in $PREFIX, being extra careful
+	# that $PREFIX is sane.
+	#
+	if [[ -e "$PREFIX" ]]; then
+		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
+		P1=$(cd "$PREFIX" && pwd)
+
+		# Delete only if $PREFIX is a proper subdirectory of eups
+		# install root
+		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
+			msg "deleting existing install in '$P1'"
+			rm -rf "$P1"
+		else
+			msg "odd install directory '$PREFIX' (not a proper subdir of eups install root). not deleting it out of abundance of caution."
+		fi
+	fi
+}
+
 default_install()
 {
 	# Called to install the package, and declare it to EUPS
@@ -435,18 +456,7 @@ default_install()
 	die_if_empty PRODUCT
 	die_if_empty VERSION
 
-	# Remove any existing directory, but be careful
-	if [[ -e "$PREFIX" ]]; then
-		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
-		P1=$(cd "$PREFIX" && pwd)
-
-		# Delete only if $PREFIX is a proper subdirectory of eups
-		# install root
-		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
-			msg "deleting existing install in '$P1'"
-			rm -rf "$P1"
-		fi
-	fi
+	clean_old_install
 
 	#
 	# Attempt to autodetect the build system
