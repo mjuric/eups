@@ -8,7 +8,7 @@
 # Should be sourced early on in pkgbuild scripts.
 #
 
-#TODO: Rename FETCH_TYPE to something better
+#TODO: Rename SOURCE to something better
 
 set -e
 
@@ -187,7 +187,7 @@ default_create()
 	die_if_empty PRODUCT
 	die_if_empty VERSION
 	die_if_empty FLAVOR
-	die_if_empty FETCH_TYPE
+	die_if_empty SOURCE
 
 	# Define temporary location for pkginfo file. We'll copy
 	# it to ups/pkginfo in the end, to avoid it being overwritten
@@ -198,15 +198,15 @@ default_create()
 	append_pkginfo PRODUCT
 	append_pkginfo VERSION
 	append_pkginfo FLAVOR
-	append_pkginfo FETCH_TYPE
+	append_pkginfo SOURCE
 
 	# Prepare the package
-	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for SOURCE='$SOURCE' type."; exit -1; }
 	append_pkginfo REPOSITORY
 
 	version_to_git_rev
 
-	case "$FETCH_TYPE" in
+	case "$SOURCE" in
 		git)
 			# Use git clone to extract ups/pkgbuild. Store the SHA1 into $PKGINFO
 			git clone -q "$REPOSITORY" tmp
@@ -227,7 +227,7 @@ default_create()
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi
 			;;
-		inline|"")
+		"local")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | tar xzf -
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
@@ -241,7 +241,7 @@ default_create()
 			fi
 			;;
 		*)
-			echo "pkgbuild error: unknown source download mechanism FETCH_TYPE='$FETCH_TYPE' (known mechanisms: git, git-archive, inline)."; exit -1;
+			echo "pkgbuild error: unknown source download mechanism SOURCE='$SOURCE' (known mechanisms: git, git-archive, local)."; exit -1;
 	esac
 
 	# move pkginfo file to its final location
@@ -251,7 +251,7 @@ default_create()
 
 	PKGINFO="ups/pkginfo"
 
-	msg "package contents created for $PRODUCT-$VERSION."
+	msg "package contents created for '$PRODUCT-$VERSION', with sources in '$SOURCE'."
 }
 
 default_fetch()
@@ -271,7 +271,7 @@ default_fetch()
 
 	version_to_git_rev
 
-	case "$FETCH_TYPE" in
+	case "$SOURCE" in
 		git)
 			# Obtain the source from a git repository
 			die_if_empty REPOSITORY
@@ -293,10 +293,10 @@ default_fetch()
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi
 			;;
-		inline|"")
+		"local")
 			;;
 		*)
-			die "unknown source '$FETCH_TYPE'. Malformed archive?";
+			die "unknown source '$SOURCE'. Malformed archive?";
 			;;
 	esac
 }
@@ -427,7 +427,7 @@ default_usage()
 
 		If run with 'create', the script will create './ups/pkginfo'
 		with package configuration, as well as prepare the package
-		depending on the chosen FETCH_TYPE.
+		depending on the chosen SOURCE.
 
 		If run with any other verb, the script will look for
 		'./ups/pkginfo' to source the configuration.  This location
@@ -507,7 +507,7 @@ use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep process
 #
 # Defaults the user can further override in pkgbuild
 #
-FETCH_TYPE=${FETCH_TYPE:-inline}			# [inline|git|git-archive]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
+SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
 MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase

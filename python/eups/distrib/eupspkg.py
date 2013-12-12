@@ -127,7 +127,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
         self.nobuild = self.options.get("nobuild", False)
         self.noclean = self.options.get("noclean", False)
 
-        self.fetch_type = self.options.get("fetch_type", "inline")
+        self.source = self.options.get("source", "")
 
         # Allow the verbosity of pkgbuild script to be set separately.
         # Useful for debugging.
@@ -223,7 +223,7 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         try:
             # Execute 'pkgbuild <create>'
             cmd = ("cd %(pkgdir)s && " + \
-                "VERBOSE=%(verbose)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s FETCH_TYPE=%(fetch_type)s " + \
+                "VERBOSE=%(verbose)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s SOURCE=%(source)s " + \
                 "%(pkgbuild)s create") % \
                     {
                       'pkgdir':   q(pkgdir),
@@ -232,7 +232,7 @@ EUPSPKG_URL = %(base)s/products/%(path)s
                       'version':  q(version),
                       'flavor':   q(flavor),
                       'pkgbuild': q(pkgbuild),
-                      'fetch_type': q(self.fetch_type),
+                      'source':   q(self.source),
                     }
             eupsServer.system(cmd)
 
