@@ -93,20 +93,27 @@ version_to_git_rev()
 	#
 	# Assume the versions are of the form:
 	#
-	#    <version>+gSHA1[+more_stuff]
+	#    <tag>:<n>:<sha1>:[dirty][+...]
 	#
 	# If the version can't be parsed, return it as-is (it may be a tag).
 	#
 	# Defines: GITREV
 	#
 
-	GITREV=$(echo $VERSION | cut -d+ -f 2)
+	#VERSION="6.2.0.0:10:g4707c82"
+	#VERSION="4707c82:dirty"
 
-	if [[ "${GITREV:0:1}" != "g" ]]; then
-		GITREV="$VERSION"
+	local VER=$(echo "$VERSION" | cut -d+ -f 1)
+	local SHA=$(echo "$VER" | cut -d: -f 3)
+	local NF=$(echo "$VER" | grep -o : | wc -l)
+
+	if [[ $NF -ne 2 || "${SHA:0:1}" != "g" || "$VER" = *:dirty ]]; then
+		GITREV="$(echo "$VER" | tr : -)"
 	else
-		GITREV=${GITREV:1}
+		GITREV=${SHA:1}
 	fi
+	#echo GITREV=$GITREV VER=$VER NF=$NF
+	#exit -1
 }
 
 eups_declare()
@@ -414,18 +421,7 @@ if [[ $PKGINFO == auto ]]; then
 		FLAVOR=generic
 
 		# Construct an EUPS-friendly version string based on git info
-		GD="$(git describe --long 2>/dev/null)"
-		if [ -z "$GD" ]; then
-			# no tags
-			GD="unknown-0-g$(git describe --long --always)"
-		fi
-		if [[ "$(git describe --always)" != "$(git describe --always --dirty)" ]]; then
-			DIRTY="_dirty"
-		fi
-		NF=$(echo "$GD" | grep -o '-' | wc -l)
-		SHA=$(echo "$GD" | cut -d- -f$(($NF+1)))
-		TAG=$(echo "$GD" | cut -d- -f1-$(($NF-1)))
-		VERSION="$TAG+$SHA$DIRTY"
+		VERSION="$(git describe --long --always --dirty | tr - :)"+unknown
 
 		PKGINFO=$(mktemp -t pkginfo)
 		append_pkginfo PRODUCT
