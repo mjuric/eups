@@ -89,7 +89,7 @@ make_targets()
 
 version_to_git_rev()
 {
-	# Parse the version into a git revision that can be pulled with git-archive
+	# Parse a git SHA out of the version, that can be pulled with git-clone
 	#
 	# Assume the versions are of the form:
 	#
@@ -107,6 +107,24 @@ version_to_git_rev()
 	else
 		GITREV=${GITREV:1}
 	fi
+}
+
+eups_declare()
+{
+	# Make the package known to EUPS
+	#
+	# NOTE: This function is not a part of the "official" API; it's here just
+	# to ease debugging.
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	# Sanity checks
+	if [[ ! -d "$PREFIX/ups" ]]; then
+		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
+	fi
+
+	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
 }
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
@@ -153,34 +171,11 @@ default_create()
 			# Extract ups/pkgbuild using git-archive
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
 			;;
-		tar.gz)
-			# Generate a tarball using git-archive, falling back to git-clone in case of failure
-			TARBALL="$FQNAME.tar.gz"
-
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild 2>/dev/null | tar xzf -
-			if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
-				git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" --prefix "$FQNAME/" --output "$TARBALL"
-				msg created the tarball in '$TARBALL' using git-archive.
-			else
-				git clone -q "$REPOSITORY" "$FQNAME"
-				(cd "$FQNAME" && git checkout -q $GITREV)
-
-				mkdir ups
-				cp -a "$FQNAME/ups/pkgbuild" ups
-
-				tar czf "$TARBALL" --exclude "$FQNAME"/.git "$FQNAME" 
-				rm -rf "$FQNAME"
-
-				msg created the tarball in '$TARBALL' using git-clone.
-			fi
-
-			append_pkginfo TARBALL
-			;;
 		inline|"")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | tar xzf -
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-				git clone "$REPOSITORY" .
+				git clone -q "$REPOSITORY" .
 				git checkout -q $GITREV
 				rm -rf .git
 			fi
@@ -227,9 +222,6 @@ default_fetch()
 			;;
 		git-archive)
 			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
-			;;
-		tar.gz)
-			tar xzf "$TARBALL" --strip-components 1 --exclude "$FQNAME/ups/pkgbuild" --exclude "$FQNAME/ups/pkginfo"
 			;;
 		inline|"")
 			;;
@@ -333,28 +325,8 @@ default_install()
 		# just copy everything
 		mkdir -p "$PREFIX"
 		cp -a ./ "$PREFIX"
-		# if this was a tarball install, remove the tarball
-		[ ! -z "$TARBALL" ] && rm "$PREFIX/$TARBALL"
 		msg "Copied the product into '$PREFIX'"
 	fi
-}
-
-eups_declare()
-{
-	# Make the package known to EUPS
-	#
-	# NOTE: This function is not a part of the "official" API; it's here just
-	# to ease debugging.
-
-	die_if_empty PRODUCT
-	die_if_empty VERSION
-
-	# Sanity checks
-	if [[ ! -d "$PREFIX/ups" ]]; then
-		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
-	fi
-
-	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
 }
 
 default_usage()
@@ -413,11 +385,12 @@ shift $((OPTIND-1))
 #
 # Defaults the user (or pkginfo) can override
 #
-FETCH_TYPE=${FETCH_TYPE:-inline}			# [|inline|git-archive|tar.gz]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
+FETCH_TYPE=${FETCH_TYPE:-inline}			# [inline|git|git-archive]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
 MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
 CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note that --prefix is passed separately.
+# -- note: more defaults are set near the end of the file
 
 #
 # Source the pkginfo file
