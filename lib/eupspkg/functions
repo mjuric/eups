@@ -9,8 +9,6 @@
 #
 
 #TODO: Rename FETCH_TYPE to something better
-#TODO: Add a convenience command that does 'prep build install declare' all in one go?
-#TODO: Move defaults block to the end (see if it is possible)
 
 set -e
 
@@ -189,6 +187,7 @@ default_create()
 	die_if_empty PRODUCT
 	die_if_empty VERSION
 	die_if_empty FLAVOR
+	die_if_empty FETCH_TYPE
 
 	# Define temporary location for pkginfo file. We'll copy
 	# it to ups/pkginfo in the end, to avoid it being overwritten
@@ -224,6 +223,9 @@ default_create()
 		git-archive)
 			# Extract ups/pkgbuild using git-archive
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
+			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
+			fi
 			;;
 		inline|"")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
@@ -239,9 +241,10 @@ default_create()
 			fi
 			;;
 		*)
-			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
+			echo "pkgbuild error: unknown source download mechanism FETCH_TYPE='$FETCH_TYPE' (known mechanisms: git, git-archive, inline)."; exit -1;
 	esac
 
+	# move pkginfo file to its final location
 	mkdir -p ups
 	mv "$PKGINFO" ups/pkginfo
 	chmod +r ups/pkginfo
@@ -286,6 +289,9 @@ default_fetch()
 			die_if_empty REPOSITORY
 			die_if_empty VERSION
 			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
+			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
+			fi
 			;;
 		inline|"")
 			;;
@@ -472,16 +478,6 @@ shift $((OPTIND-1))
 [[ $# -ge 1 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
 
 #
-# Defaults the user (or pkginfo) can override
-#
-FETCH_TYPE=${FETCH_TYPE:-inline}			# [inline|git|git-archive]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
-REPOSITORY=${REPOSITORY:-}				# URL to git repository
-MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
-MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
-CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note that --prefix is passed separately.
-# -- note: more defaults are set near the end of the file
-
-#
 # Source the pkginfo file
 #
 
@@ -511,7 +507,12 @@ use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep process
 #
 # Defaults the user can further override in pkgbuild
 #
+FETCH_TYPE=${FETCH_TYPE:-inline}			# [inline|git|git-archive]. Usually passed in via command line (eups distrib create ... -S FETCH_TYPE=...)
+REPOSITORY=${REPOSITORY:-}				# URL to git repository
+MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
+MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
+CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note that --prefix is passed separately.
+
 PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}
-FQNAME=${FQNAME:-"$PRODUCT-$VERSION"}
 
 PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}	# Options passed to setup.py install. Note that --prefix is NOT passed separately!
