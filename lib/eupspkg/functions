@@ -76,19 +76,6 @@ use_parallel_jobs()
 	debug "  SCONSFLAGS=$SCONSFLAGS"
 }
 
-make_targets()
-{
-	# If called w/o arguments, call make w/o a target
-	if [[ $# == 0 ]]; then
-		PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make
-	else
-		# Run "make <target>" for each argument, with PRODUCT and VERSION exported
-		for target in "$@"; do
-			PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" make $target
-		done
-	fi
-}
-
 detect_compiler()
 {
 	#
@@ -163,7 +150,7 @@ autoversion()
 
 		# Construct an EUPS-friendly version string based on git info
 		# Does not encode dependencies in version (no +N part)
-		VERSION="$(git describe --long --always $DIRTY_FLAG | tr - _)"
+		VERSION="$(git describe --always $DIRTY_FLAG | tr - _)"
 
 		warn "    auto-determined: PRODUCT=$PRODUCT"
 		warn "    auto-determined: VERSION=$VERSION"
@@ -393,9 +380,9 @@ default_build()
 		scons opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
 		./configure $CONFIGURE_OPTIONS
-		make_targets $MAKE_BUILD_TARGETS
+		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile ]]; then
-		make_targets $MAKE_BUILD_TARGETS
+		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f setup.py ]]; then
 		python setup.py build
 	else
@@ -418,6 +405,7 @@ install_ups()
 	# Expand the table file, if any
 	if [[ -f "$PREFIX/ups/$PRODUCT.table" ]]; then
 		eups expandtable -i -W '^(?!LOCAL:)' "$PREFIX/ups/$PRODUCT.table"
+		info "expanded table file '$PREFIX/ups/$PRODUCT.table'"
 	else
 		msg "no table file to expand (looked for '$PREFIX/ups/$PRODUCT.table')".
 	fi
@@ -465,7 +453,7 @@ default_install()
 	if [[ -f SConstruct ]]; then
 		scons opt=3 prefix="$PREFIX" version="$VERSION" install
 	elif [[ -f Makefile ]]; then
-		make_targets $MAKE_INSTALL_TARGETS
+		make prefix="$PREFIX" version="$VERSION"  $MAKE_INSTALL_TARGETS
 		install_ups
 	elif [[ -f setup.py ]]; then
 		python setup.py install $PYSETUP_INSTALL_OPTIONS
