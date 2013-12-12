@@ -163,7 +163,7 @@ autoversion()
 
 		# Construct an EUPS-friendly version string based on git info
 		# Does not encode dependencies in version (no +N part)
-		VERSION="$(git describe --long --always --dirty | tr - _)"
+		VERSION="$(git describe --long --always $DIRTY_FLAG | tr - _)"
 
 		warn "    auto-determined: PRODUCT=$PRODUCT"
 		warn "    auto-determined: VERSION=$VERSION"
@@ -218,6 +218,7 @@ eups_declare()
 	fi
 
 	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
+	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
 }
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
@@ -391,7 +392,7 @@ default_build()
 	if [[ -f SConstruct ]]; then
 		scons opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
-		./configure --prefix "$PREFIX" $CONFIGURE_OPTIONS
+		./configure $CONFIGURE_OPTIONS
 		make_targets $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile ]]; then
 		make_targets $MAKE_BUILD_TARGETS
@@ -488,6 +489,7 @@ default_usage()
 
 		  v : set verbosity level (-2 through +2, default 0)
 		  a : autodetect PRODUCT and VERSION using git
+		  d : don't detect for dirty working dir in autodetect
 		  h : show usage instructions
 
 		If run with 'create', the script will create './ups/pkginfo'
@@ -524,16 +526,22 @@ usage()   { default_usage "$@"; }
 # Parse command line arguments
 #
 VERBOSE=${VERBOSE:-0}
-while getopts ":v:ha" opt; do
+DIRTY_FLAG=${DIRTY_FLAG:-"--dirty"}
+while getopts ":v:had" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
-		a) autoversion ;;
+		a) AUTOVERSION=on ;;
+		d) DIRTY_FLAG="" ;;
 		h) usage; exit; ;;
 		\?) die "Invalid option: -$OPTARG" ;;
 		:) die "Option -$OPTARG requires an argument." ;;
 	esac
 done
 shift $((OPTIND-1))
+
+if [[ "$AUTOVERSION" == on ]]; then
+	autoversion
+fi
 
 #
 # Debug level 3 activates tracing
@@ -574,10 +582,11 @@ use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep process
 #
 SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
+
 MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
-CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note that --prefix is passed separately.
 
-PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}
+PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory to which the product will be installed
 
-PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}	# Options passed to setup.py install. Note that --prefix is NOT passed separately!
+CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
+PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}		# Options passed to setup.py install. Note that --prefix is NOT passed separately!
