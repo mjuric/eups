@@ -87,6 +87,35 @@ make_targets()
 	fi
 }
 
+autoversion()
+{
+	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
+	# a working directory of a git repository.
+	#
+	# This exists primarily to enable debugging.
+	if hash git 2>/dev/null; then
+		warn "using git heuristics to deduce pkginfo contents."
+
+		FLAVOR=generic
+		REMOTE=$(git config --get remote.origin.url || true)
+		if [[ -z "$REMOTE" ]]; then
+			die "No git remote named 'origin', or git error.";
+		fi
+
+		PRODUCT="$(basename "$REMOTE" .git)"
+
+		# Construct an EUPS-friendly version string based on git info
+		# Does not encode dependencies in version (no +N part)
+		VERSION="$(git describe --long --always --dirty | tr - :)"
+
+		warn "    auto-determined: PRODUCT=$PRODUCT"
+		warn "    auto-determined: VERSION=$VERSION"
+		warn "    assumed:         FLAVOR=$FLAVOR"
+	else
+		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
+	fi
+}
+
 version_to_git_rev()
 {
 	# Parse a git SHA out of the version, that can be pulled with git-clone
@@ -145,10 +174,6 @@ default_create()
 	# Env: Nothing guaranteed to be setup-ed
 	#
 
-	die_if_empty PRODUCT
-	die_if_empty VERSION
-	die_if_empty PKGINFO
-
 	# safety: refuse to work in a directory containing anything other than 'ups'
 	# subdirectory. This will prevent chaos when careless users run pkgbuild create
 	# in their source directories.
@@ -156,13 +181,29 @@ default_create()
 		die "safety first: refusing to run from a non-empty directory."
 	fi
 
-	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+	# Make sure the important ones are here
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+	die_if_empty FLAVOR
 
+	# Define temporary location for pkginfo file. We'll copy
+	# it to ups/pkginfo in the end, to avoid it being overwritten
+	# by package creation commands below.
+	PKGINFO=$(mktemp -t pkginfo)
+
+	# Store the variables we know of to pkginfo
+	append_pkginfo PRODUCT
+	append_pkginfo VERSION
+	append_pkginfo FLAVOR
+	append_pkginfo FETCH_TYPE
+
+	# Prepare the package
+	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
 	version_to_git_rev
 
 	case "$FETCH_TYPE" in
 		git)
-			# Use git clone to extract ups/pkgbuild. Store the SHA1 in $PKGINFO
+			# Use git clone to extract ups/pkgbuild. Store the SHA1 into $PKGINFO
 			git clone -q "$REPOSITORY" tmp
 			(cd tmp && git checkout -q $GITREV)
 
@@ -191,8 +232,11 @@ default_create()
 			echo "pkgbuild error: unknown source type FETCH_TYPE='$FETCH_TYPE'."; exit -1;
 	esac
 
-	cp "$PKGINFO" ups/pkginfo
+	mkdir -p ups
+	mv "$PKGINFO" ups/pkginfo
 	chmod +r ups/pkginfo
+
+	PKGINFO="ups/pkginfo"
 
 	msg "package contents created for $PRODUCT-$VERSION."
 }
@@ -289,8 +333,10 @@ default_build()
 install_ups()
 {
 	# Copy the contents of ups/ to $PREFIX/ups and expand the table files
+	#
+	# It's necessary to call this if the native install method doesn't
+	# copy/expand ups/ content
 
-	die_if_empty PKGINFO
 	[ ! -d ups ] && die "no 'ups' directory to copy to destination (are you running from package root?)";
 
 	mkdir -p "$PREFIX/ups"
@@ -341,17 +387,26 @@ default_usage()
 	cat <<-"EOF"
 		pkgbuild -- EupsPkg builder script
 
-		usage: pkgbuild [-h] [-v verbosity] pkginfo verb
+		usage: pkgbuild [-h] [-v verbosity] verb
 
-		  optinfo : location of pkginfo or 'none' to skip
 		  verb    : one of create, fetch, prep, build, install
 
 		  v : set verbosity level (-2 through +2, default 0)
 		  h : show usage instructions
 
-		If pkginfo is set to 'auto', a crude auto-detection
+		If run with create, the script will create './ups/pkginfo'
+		with package configuration, as well as prepare the package
+		depending on the chosen FETCH_TYPE.
+		
+		If run with any other verb, the script will look for
+		'./ups/pkginfo' to source the configuration. This location
+		can be overridden via the PKGINFO environment variable.
+
+		If $PKGINFO is equal to 'auto', a crude auto-detection
 		algorithm will be employed to deduce PRODUCT and VERSION
-		using git (this should _never_ be used to create packages).
+		using git and generate a pkginfo file on the fly. This 
+		is primarily for debugging, and should _never_ be used to
+		work with packages.
 
 EOF
 }
@@ -387,7 +442,7 @@ shift $((OPTIND-1))
 #
 [[ $VERBOSE -ge 3 ]] && set -x
 
-[[ $# -ge 2 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
+[[ $# -ge 1 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
 
 #
 # Defaults the user (or pkginfo) can override
@@ -402,48 +457,38 @@ CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note 
 #
 # Source the pkginfo file
 #
-PKGINFO="$1"
-shift
-if [[ $PKGINFO == auto ]]; then
-	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
-	# a working directory of a git repository.
-	#
-	# This exists primarily to enable debugging.
-	if hash git 2>/dev/null; then
-		warn "using git heuristics to deduce pkginfo contents."
 
-		REMOTE=$(git config --get remote.origin.url || true)
-		if [[ -z "$REMOTE" ]]; then
-			die "No git remote named 'origin', or git error.";
-		fi
-
-		PRODUCT="$(basename "$REMOTE" .git)"
-		FLAVOR=generic
-
-		# Construct an EUPS-friendly version string based on git info
-		VERSION="$(git describe --long --always --dirty | tr - :)"+unknown
-
-		PKGINFO=$(mktemp -t pkginfo)
-		append_pkginfo PRODUCT
-		append_pkginfo VERSION
-		append_pkginfo FLAVOR
-
-		warn "temporary pkginfo file created in $PKGINFO"
-		warn "    auto-determined: PRODUCT=$PRODUCT"
-		warn "    auto-determined: VERSION=$VERSION"
-		warn "    assumed:         FLAVOR=$FLAVOR"
-
-	else
-		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
+# Find PKGINFO if passed on the command line
+for var in "$@"; do
+	if [[ $var == "PKGINFO="* ]]; then
+		eval "$var"
 	fi
-else
-	. "$PKGINFO"
+done
+
+if [[ "$1" != "create" ]]; then
+#	if [[ "$PKGINFO" == auto ]]; then
+#		autoversion
+#
+#		PKGINFO=$(mktemp -t pkginfo)
+#		append_pkginfo PRODUCT
+#		append_pkginfo VERSION
+#		append_pkginfo FLAVOR
+#
+#		warn "temporary pkginfo file created in $PKGINFO"
+	if [[ ! -z "$PKGINFO" ]]; then
+		. "$PKGINFO"
+	elif [[ -f ups/pkginfo ]]; then
+		PKGINFO=ups/pkginfo
+		. "$PKGINFO"
+	else
+		die "no './ups/pkginfo' file and \$PKGINFO is not defined (try PKGINFO=auto)."
+	fi
 fi
 
-# Check for basic sanity. Don't die, as this may just be a power user
-# writing a very weird pkgbuild script.
-[[ -z "$VERSION" ]] && warn "VERSION not defined. hope you know what you're doing."
-[[ -z "$PRODUCT" ]] && warn "PRODUCT not defined. hope you know what you're doing."
+#
+# eval command line overrides (typically variable definitions; VAR1=A VAR2=B ...)
+#
+eval "$@"
 
 #
 # Try to figure out how many cores does this machine have, and tweak
