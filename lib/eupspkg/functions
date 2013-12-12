@@ -106,7 +106,7 @@ autoversion()
 
 		# Construct an EUPS-friendly version string based on git info
 		# Does not encode dependencies in version (no +N part)
-		VERSION="$(git describe --long --always --dirty | tr - :)"
+		VERSION="$(git describe --long --always --dirty | tr - _)"
 
 		warn "    auto-determined: PRODUCT=$PRODUCT"
 		warn "    auto-determined: VERSION=$VERSION"
@@ -137,7 +137,7 @@ version_to_git_rev()
 	local NF=$(echo "$VER" | grep -o : | wc -l)
 
 	if [[ $NF -ne 2 || "${SHA:0:1}" != "g" || "$VER" = *:dirty ]]; then
-		GITREV="$(echo "$VER" | tr : -)"
+		GITREV="$(echo "$VER" | tr _ -)"
 	else
 		GITREV=${SHA:1}
 	fi
@@ -199,6 +199,8 @@ default_create()
 
 	# Prepare the package
 	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for FETCH_TYPE='$FETCH_TYPE' type."; exit -1; }
+	append_pkginfo REPOSITORY
+
 	version_to_git_rev
 
 	case "$FETCH_TYPE" in
@@ -225,6 +227,10 @@ default_create()
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				git clone -q "$REPOSITORY" .
 				git checkout -q $GITREV
+
+				SHA1=$(git rev-parse HEAD)
+				append_pkginfo SHA1
+
 				rm -rf .git
 			fi
 			;;
@@ -387,26 +393,28 @@ default_usage()
 	cat <<-"EOF"
 		pkgbuild -- EupsPkg builder script
 
-		usage: pkgbuild [-h] [-v verbosity] verb
+		usage: pkgbuild [-ha] [-v verbosity] verb
 
 		  verb    : one of create, fetch, prep, build, install
 
 		  v : set verbosity level (-2 through +2, default 0)
+		  a : autodetect PRODUCT and VERSION using git
 		  h : show usage instructions
 
-		If run with create, the script will create './ups/pkginfo'
+		If run with 'create', the script will create './ups/pkginfo'
 		with package configuration, as well as prepare the package
 		depending on the chosen FETCH_TYPE.
-		
-		If run with any other verb, the script will look for
-		'./ups/pkginfo' to source the configuration. This location
-		can be overridden via the PKGINFO environment variable.
 
-		If $PKGINFO is equal to 'auto', a crude auto-detection
-		algorithm will be employed to deduce PRODUCT and VERSION
-		using git and generate a pkginfo file on the fly. This 
-		is primarily for debugging, and should _never_ be used to
-		work with packages.
+		If run with any other verb, the script will look for
+		'./ups/pkginfo' to source the configuration.  This location
+		can be overridden via the PKGINFO environment variable.  If
+		neither is given, the script will assume the configuration
+		is passed via the environment.
+
+		If -a is given a crude auto-detection algorithm will be
+		employed to deduce PRODUCT and VERSION from git. This is
+		primarily for debugging, and should _never_ be used to
+		install packages.
 
 EOF
 }
@@ -427,9 +435,10 @@ usage()   { default_usage "$@"; }
 # Parse command line arguments
 #
 VERBOSE=${VERBOSE:-0}
-while getopts ":v:h" opt; do
+while getopts ":v:ha" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
+		a) autoversion ;;
 		h) usage; exit; ;;
 		\?) die "Invalid option: -$OPTARG" ;;
 		:) die "Option -$OPTARG requires an argument." ;;
@@ -458,37 +467,22 @@ CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-}		# Options passed to ./configure. Note 
 # Source the pkginfo file
 #
 
-# Find PKGINFO if passed on the command line
-for var in "$@"; do
-	if [[ $var == "PKGINFO="* ]]; then
-		eval "$var"
-	fi
-done
-
 if [[ "$1" != "create" ]]; then
-#	if [[ "$PKGINFO" == auto ]]; then
-#		autoversion
-#
-#		PKGINFO=$(mktemp -t pkginfo)
-#		append_pkginfo PRODUCT
-#		append_pkginfo VERSION
-#		append_pkginfo FLAVOR
-#
-#		warn "temporary pkginfo file created in $PKGINFO"
 	if [[ ! -z "$PKGINFO" ]]; then
 		. "$PKGINFO"
 	elif [[ -f ups/pkginfo ]]; then
 		PKGINFO=ups/pkginfo
 		. "$PKGINFO"
-	else
-		die "no './ups/pkginfo' file and \$PKGINFO is not defined (try PKGINFO=auto)."
+	elif [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
+		warn "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined. hope you know what you're doing."
 	fi
 fi
 
 #
-# eval command line overrides (typically variable definitions; VAR1=A VAR2=B ...)
+# UNDOCUMENTED FEATURE: eval command line overrides (typically variable
+# definitions; VAR1=A VAR2=B ...)
 #
-eval "$@"
+eval "${@:2}"
 
 #
 # Try to figure out how many cores does this machine have, and tweak
