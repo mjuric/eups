@@ -8,6 +8,10 @@
 # Should be sourced early on in pkgbuild scripts.
 #
 
+#TODO: Rename FETCH_TYPE to something better
+#TODO: Add a convenience command that does 'prep build install declare' all in one go?
+#TODO: Move defaults block to the end (see if it is possible)
+
 set -e
 
 ##################### ---- UTILITY FUNCTIONS ---- #####################
@@ -267,6 +271,7 @@ default_fetch()
 	case "$FETCH_TYPE" in
 		git)
 			# Obtain the source from a git repository
+			die_if_empty REPOSITORY
 			die_if_empty SHA1
 
 			git clone -q "$REPOSITORY" tmp
@@ -278,12 +283,14 @@ default_fetch()
 			rmdir tmp
 			;;
 		git-archive)
+			die_if_empty REPOSITORY
+			die_if_empty VERSION
 			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
 			;;
 		inline|"")
 			;;
 		*)
-			echo "Unknown source '$FETCH_TYPE'. Malformed archive?"; exit -1;
+			die "unknown source '$FETCH_TYPE'. Malformed archive?";
 			;;
 	esac
 }
@@ -316,8 +323,6 @@ default_build()
 
 	die_if_empty PRODUCT
 	die_if_empty VERSION
-
-	echo PREFIX="$PREFIX"
 
 	#
 	# Attempt to autodetect the build system
@@ -368,6 +373,19 @@ default_install()
 
 	die_if_empty PRODUCT
 	die_if_empty VERSION
+
+	# Remove any existing directory, but be careful
+	if [[ -e "$PREFIX" ]]; then
+		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
+		P1=$(cd "$PREFIX" && pwd)
+
+		# Delete only if $PREFIX is a proper subdirectory of eups
+		# install root
+		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
+			msg "deleting existing install in '$P1'"
+			rm -rf "$P1"
+		fi
+	fi
 
 	#
 	# Attempt to autodetect the build system
