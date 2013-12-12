@@ -89,6 +89,61 @@ make_targets()
 	fi
 }
 
+detect_compiler()
+{
+	#
+	# Properly detects C and C++ compiler types. Dies if the two are not
+	# the same.
+	#
+	# Defines:
+	#	COMPILER_TYPE, CXX_COMP_TYPE, C_COMP_TYPE
+	#
+
+	# Construct test source files
+	local S="$(mktemp -t comptest)".c
+	cat > "$S" <<-EOF
+		#include <stdio.h>
+
+		int main()
+		{
+			#if defined(__clang__)
+				printf("clang");
+			#elif defined(__ICC) || defined(__INTEL_COMPILER)
+				printf("icc");
+			#elif defined(__GNUC__) || defined(__GNUG__)
+				printf("gcc");
+			#elif defined(_MSC_VER)
+				printf("msvc");
+			#elif defined(__PGI)
+				printf("pgcc");
+			#else
+				printf("unknown");
+			#endif
+
+			return 0;
+		}
+	EOF
+	local SCXX="$(mktemp -t comptest)".cxx
+	cp "$S" "$SCXX"
+
+	# Build and run the test
+	local O=$(mktemp -t comptest)
+	local OCXX=$(mktemp -t comptest)
+	CC1="${CC:-cc}"
+	CXX1="${CXX:-c++}"
+	"$CC1" "$S" -o "$O"
+	"$CXX1" "$SCXX" -o "$OCXX"
+	C_COMP_TYPE=$("$O")
+	CXX_COMP_TYPE=$("$OCXX")
+
+	# Check compiler type consistency
+	if [[ "$CXX_COMP_TYPE" != "$C_COMP_TYPE" ]]; then
+		die "C and C++ compiler versions differ ($CC1 is of type '$C_COMP_TYPE' while $CXX1 is of type '$CXX_COMP_TYPE')"
+	fi
+
+	COMPILER_TYPE="$CXX_COMP_TYPE"
+}
+
 autoversion()
 {
 	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
