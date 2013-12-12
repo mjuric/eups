@@ -87,7 +87,7 @@ detect_compiler()
 	#
 
 	# Construct test source files
-	local S="$(mktemp -t comptest)".c
+	local S="$(mktemp -t comptest.XXXXX)".c
 	cat > "$S" <<-EOF
 		#include <stdio.h>
 
@@ -110,12 +110,12 @@ detect_compiler()
 			return 0;
 		}
 	EOF
-	local SCXX="$(mktemp -t comptest)".cxx
+	local SCXX="$(mktemp -t comptest.XXXXX)".cxx
 	cp "$S" "$SCXX"
 
 	# Build and run the test
-	local O=$(mktemp -t comptest)
-	local OCXX=$(mktemp -t comptest)
+	local O=$(mktemp -t comptest.XXXXX)
+	local OCXX=$(mktemp -t comptest.XXXXX)
 	CC1="${CC:-cc}"
 	CXX1="${CXX:-c++}"
 	"$CC1" "$S" -o "$O"
@@ -235,7 +235,7 @@ default_create()
 	# Define temporary location for pkginfo file. We'll copy
 	# it to ups/pkginfo in the end, to avoid it being overwritten
 	# by package creation commands below.
-	PKGINFO=$(mktemp -t pkginfo)
+	PKGINFO=$(mktemp -t pkginfo.XXXXX)
 
 	# Store the variables we know of to pkginfo
 	append_pkginfo PRODUCT
@@ -244,7 +244,7 @@ default_create()
 	append_pkginfo SOURCE
 
 	# Prepare the package
-	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: $REPOSITORY must be set for SOURCE='$SOURCE' type."; exit -1; }
+	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: REPOSITORY must be set for SOURCE='$SOURCE' type."; exit -1; }
 	append_pkginfo REPOSITORY
 
 	version_to_git_rev
@@ -265,14 +265,18 @@ default_create()
 			;;
 		git-archive)
 			# Extract ups/pkgbuild using git-archive
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | tar xzf -
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | (tar xzf - 2>/dev/null || true)
+			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
+			#       BSD tar returns success on broken pipe, gnu tar returns an error.
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi
 			;;
 		"local")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | tar xzf -
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | (tar xzf - 2>/dev/null || true)
+			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
+			#       BSD tar returns success on broken pipe, gnu tar returns an error.
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				git clone -q "$REPOSITORY" .
 				git checkout -q $GITREV
@@ -331,7 +335,9 @@ default_fetch()
 		git-archive)
 			die_if_empty REPOSITORY
 			die_if_empty VERSION
-			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo
+			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
+			#       BSD tar returns success on broken pipe, gnu tar returns an error.
+			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | (tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo 2>/dev/null || true)
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi

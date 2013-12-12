@@ -132,7 +132,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
         # Allow the verbosity of pkgbuild script to be set separately.
         # Useful for debugging.
         # PROBLEM: this only seems to work for 'eups distrib create'
-        self.pkgbuild_verbose = self.options.get("verbose", Eups.verbose)
+        self.pkgbuild_verbose = self.options.get("verbose", str(Eups.verbose))
 
 
     # @staticmethod   # requires python 2.4
