@@ -248,6 +248,42 @@ clean_old_install()
 	fi
 }
 
+resolve_repository()
+{
+	#
+	# Resolve the path to git repository, by expanding patterns
+	# specified on RESOLVE_PATH.  If $REPOSITORY has already been
+	# explicitly set, do nothing.
+	#
+	# RESOLVE_PATH must be of the form:
+	#
+	#   'git://server1/dirs1/$PRODUCT.git|http://server2/dirs2/$PRODUCT.git'
+	#
+	# etc., i.e., a |-delimited string of Bash strings which will be eval-ed
+	# in the current environment.
+	#
+	# Defines: REPOSITORY
+	#
+
+	if [[ ! -z "$REPOSITORY" ]]; then
+		info explicit repository given as $REPOSITORY, nothing to resolve.
+		return
+	fi
+	
+	die_if_empty REPOSITORY_PATH
+
+	IFS='|' read -ra REPOSITORY_PATH_ARRAY <<< "$REPOSITORY_PATH"
+	for PAT in "${REPOSITORY_PATH_ARRAY[@]}"; do
+		eval "REPOSITORY=\"$PAT\""
+		info "trying $REPOSITORY"
+		if git ls-remote "$REPOSITORY" master >/dev/null 2>&1; then
+			info "repository resolved to $REPOSITORY."
+			return
+		fi
+	done
+
+	die "failed to resolve repository for $PRODUCT-$VERSION using REPOSITORY_PATH=$REPOSITORY_PATH. Check the path or accessibility of your git repositories."
+}
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
 
@@ -285,7 +321,7 @@ default_create()
 	append_pkginfo SOURCE
 
 	# Prepare the package
-	[[ ! -z "$REPOSITORY" ]] || { echo "pkgbuild error: REPOSITORY must be set for SOURCE='$SOURCE' type."; exit -1; }
+	resolve_repository
 	append_pkginfo REPOSITORY
 
 	version_to_git_rev
@@ -365,12 +401,20 @@ default_fetch()
 			die_if_empty REPOSITORY
 			die_if_empty SHA1
 
+			info "fetching by git cloning from $REPOSITORY"
 			git clone -q "$REPOSITORY" tmp
 			(cd tmp && git checkout -q $SHA1)
 
 			rm -rf tmp/.git
 
-			find tmp -depth 1 -exec mv {} . \;
+			# move everything but the contents of the ups directory (as it already exists)
+			find tmp -maxdepth 1 -mindepth 1 ! -name ups -exec mv {} . \;
+			# move the contents of the ups directory, excluding pkgbuild and pkginfo
+			find tmp/ups -maxdepth 1 -mindepth 1 ! \(  -name pkgbuild -o -name pkginfo \) -exec mv {} ups \;
+			rm -f tmp/ups/pkgbuild tmp/ups/pkginfo
+			rmdir tmp/ups 2>/dev/null || true
+
+			# the tmp directory must be empty at this point
 			rmdir tmp
 			;;
 		git-archive)
@@ -378,6 +422,8 @@ default_fetch()
 			die_if_empty VERSION
 			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
 			#       BSD tar returns success on broken pipe, gnu tar returns an error.
+
+			info "fetching via git-archive from $REPOSITORY"
 			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | (tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo 2>/dev/null || true)
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
@@ -532,6 +578,57 @@ build()   { default_build "$@"; }
 install() { default_install "$@"; }
 usage()   { default_usage "$@"; }
 
+##################### ---- DEBUGGING UTILITIES ---- #####################
+
+xcreate()
+{
+	# Quickly creates the package in _create subdirectory, emptying it
+	# first if it already exists.  It's primary purpose is to help
+	# testing of create verb implementations.
+	#
+	# Typical usage:
+	#
+	#    ./ups/pkgbuild -a xcreate
+	#
+	# and the result will be in _create
+	#
+
+	# create an empty _create subdir
+	rm -rf _create
+	mkdir _create
+
+	# run create() from the empty directory
+	cd _create
+	create "$@"
+
+	msg "the result is in ./_create"
+}
+
+xfetch()
+{
+	#
+	# Runs fetch() on the package whose contents is in ./_create. 
+	# Stores the result into ./_fetch, emptying it first if it already
+	# exists.  The primary purpose of this function is to help with
+	# testing of fetch verb implementations.
+	#
+	# Typical usage:
+	#
+	#    ./ups/pkgbuild xfetch
+	#
+	# and the result will be in _fetch
+	#
+
+	[[ -d _create ]] || die "no _create directory; run '$0 xcreate' first."
+
+	rm -rf _fetch
+	cp -a _create _fetch
+
+	(cd _fetch && ./ups/pkgbuild -v $VERBOSE fetch)
+
+	msg "the result is in ./_fetch"
+}
+
 ##################### ---- INITIALIZATION ---- #####################
 
 #
@@ -566,10 +663,12 @@ fi
 # Source the pkginfo file
 #
 
-if [[ "$1" != "create" ]]; then
+if [[ "$1" != "create" && "$1" != "xfetch" ]]; then
 	if [[ ! -z "$PKGINFO" ]]; then
+		debug "sourcing pkginfo from PKGINFO='$PKGINFO'."
 		. "$PKGINFO"
 	elif [[ -f ups/pkginfo ]]; then
+		debug "detected pkginfo in ups/pkginfo."
 		PKGINFO=ups/pkginfo
 		. "$PKGINFO"
 	elif [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
