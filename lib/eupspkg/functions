@@ -8,8 +8,6 @@
 # Should be sourced early on in pkgbuild scripts.
 #
 
-#TODO: Rename SOURCE to something better
-
 set -e
 
 ##################### ---- UTILITY FUNCTIONS ---- #####################
@@ -138,7 +136,7 @@ autoversion()
 	#
 	# This exists primarily to enable debugging.
 	if hash git 2>/dev/null; then
-		warn "using git heuristics to deduce pkginfo contents."
+		msg "using git heuristics to deduce pkginfo contents."
 
 		FLAVOR=generic
 		REMOTE=$(git config --get remote.origin.url || true)
@@ -152,9 +150,9 @@ autoversion()
 		# Does not encode dependencies in version (no +N part)
 		VERSION="$(git describe --always $DIRTY_FLAG | tr - _)"
 
-		warn "    auto-determined: PRODUCT=$PRODUCT"
-		warn "    auto-determined: VERSION=$VERSION"
-		warn "    assumed:         FLAVOR=$FLAVOR"
+		msg "    auto-determined: PRODUCT=$PRODUCT"
+		msg "    auto-determined: VERSION=$VERSION"
+		msg "    assumed:         FLAVOR=$FLAVOR"
 	else
 		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
 	fi
@@ -207,6 +205,49 @@ eups_declare()
 	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
 	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
 }
+
+install_ups()
+{
+	# Copy the contents of ups/ to $PREFIX/ups and expand the table files
+	#
+	# It's necessary to call this if the native install method doesn't
+	# copy/expand ups/ content
+
+	[ ! -d ups ] && die "no 'ups' directory to copy to destination (are you running from package root?)";
+
+	mkdir -p "$PREFIX/ups"
+	cp -f -a ./ups/* "$PREFIX/ups"
+
+	# Expand the table file, if any
+	if [[ -f "$PREFIX/ups/$PRODUCT.table" ]]; then
+		eups expandtable -i -W '^(?!LOCAL:)' "$PREFIX/ups/$PRODUCT.table"
+		info "expanded table file '$PREFIX/ups/$PRODUCT.table'"
+	else
+		msg "no table file to expand (looked for '$PREFIX/ups/$PRODUCT.table')".
+	fi
+}
+
+clean_old_install()
+{
+	#
+	# Remove any existing content in $PREFIX, being extra careful
+	# that $PREFIX is sane.
+	#
+	if [[ -e "$PREFIX" ]]; then
+		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
+		P1=$(cd "$PREFIX" && pwd)
+
+		# Delete only if $PREFIX is a proper subdirectory of eups
+		# install root
+		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
+			msg "deleting existing install in '$P1'"
+			rm -rf "$P1"
+		else
+			msg "odd install directory '$PREFIX' (not a proper subdir of eups install root). not deleting it out of abundance of caution."
+		fi
+	fi
+}
+
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
 
@@ -352,7 +393,24 @@ default_fetch()
 
 default_prep()
 {
-	# Should apply any patches and prepare the code to be built using build()
+	# Should apply any patches and prepare the code to be configured
+	# --
+	# Called by 'eups distrib install <pkgname> <version>'
+	# Caller: buildbot, to prep the package for configuration
+	# --
+	# CWD: Called from $builddir
+	# Env: Called in environment with setup-ed dependencies, but not the package itself
+	# --
+	# Typical override:
+	#   apply applicable patches from $sourcedir/patches, depending
+        #   on platform we're being compiled on.
+
+	:
+}
+
+default_config()
+{
+	# Should apply any patches and configure the code to be built using build()
 	# --
 	# Called by 'eups distrib install <pkgname> <version>'
 	# Caller: buildbot, to prep the package for building
@@ -361,9 +419,11 @@ default_prep()
 	# Env: Called in environment with setup-ed dependencies, but not the package itself
 	# --
 	# Typical override:
-	#   apply applicable patches from $sourcedir/patches, depending
-        #   on platform we're being compiled on.
-        :
+	#   run custom configuration scripts
+
+	if [[ -f configure ]]; then
+		./configure $CONFIGURE_OPTIONS
+	fi
 }
 
 default_build()
@@ -385,7 +445,6 @@ default_build()
 	if [[ -f SConstruct ]]; then
 		scons opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
-		./configure $CONFIGURE_OPTIONS
 		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile ]]; then
 		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
@@ -393,48 +452,6 @@ default_build()
 		python setup.py build
 	else
 		msg "no build system detected; assuming no build needed."
-	fi
-}
-
-install_ups()
-{
-	# Copy the contents of ups/ to $PREFIX/ups and expand the table files
-	#
-	# It's necessary to call this if the native install method doesn't
-	# copy/expand ups/ content
-
-	[ ! -d ups ] && die "no 'ups' directory to copy to destination (are you running from package root?)";
-
-	mkdir -p "$PREFIX/ups"
-	cp -f -a ./ups/* "$PREFIX/ups"
-
-	# Expand the table file, if any
-	if [[ -f "$PREFIX/ups/$PRODUCT.table" ]]; then
-		eups expandtable -i -W '^(?!LOCAL:)' "$PREFIX/ups/$PRODUCT.table"
-		info "expanded table file '$PREFIX/ups/$PRODUCT.table'"
-	else
-		msg "no table file to expand (looked for '$PREFIX/ups/$PRODUCT.table')".
-	fi
-}
-
-clean_old_install()
-{
-	#
-	# Remove any existing content in $PREFIX, being extra careful
-	# that $PREFIX is sane.
-	#
-	if [[ -e "$PREFIX" ]]; then
-		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
-		P1=$(cd "$PREFIX" && pwd)
-
-		# Delete only if $PREFIX is a proper subdirectory of eups
-		# install root
-		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
-			msg "deleting existing install in '$P1'"
-			rm -rf "$P1"
-		else
-			msg "odd install directory '$PREFIX' (not a proper subdir of eups install root). not deleting it out of abundance of caution."
-		fi
 	fi
 }
 
@@ -479,7 +496,7 @@ default_usage()
 
 		usage: pkgbuild [-ha] [-v verbosity] verb
 
-		  verb    : one of create, fetch, prep, build, install
+		  verb  : one of create, fetch, prep, config, build, install
 
 		  v : set verbosity level (-2 through +2, default 0)
 		  a : autodetect PRODUCT and VERSION using git
@@ -509,7 +526,8 @@ EOF
 #
 create()  { default_create "$@"; }
 fetch()   { default_fetch "$@"; }
-prep()    { default_prep "$@"; }
+prep()   { default_prep "$@"; }
+config()  { default_config "$@"; }
 build()   { default_build "$@"; }
 install() { default_install "$@"; }
 usage()   { default_usage "$@"; }
@@ -555,7 +573,7 @@ if [[ "$1" != "create" ]]; then
 		PKGINFO=ups/pkginfo
 		. "$PKGINFO"
 	elif [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
-		warn "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined. hope you know what you're doing."
+		die "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined."
 	fi
 fi
 
@@ -571,9 +589,8 @@ eval "${@:2}"
 #
 use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
 
-#
-# Defaults the user can further override in pkgbuild
-#
+##################### ---- Defaults ---- #####################
+
 SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
 
