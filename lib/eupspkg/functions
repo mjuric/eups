@@ -642,6 +642,15 @@ xfetch()
 	msg "the result is in ./_fetch"
 }
 
+xclean()
+{
+	#
+	# Clean the outputs of x* verbs
+	#
+
+	rm -rf _fetch _create
+}
+
 ##################### ---- INITIALIZATION ---- #####################
 
 #
@@ -676,7 +685,7 @@ fi
 # Source the pkginfo file
 #
 
-if [[ "$1" != "create" && "$1" != "xfetch" ]]; then
+if [[ "$1" != "create" && "$1" != "xfetch" && "$1" != "xclean" ]]; then
 	if [[ ! -z "$PKGINFO" ]]; then
 		debug "sourcing pkginfo from PKGINFO='$PKGINFO'."
 		. "$PKGINFO"

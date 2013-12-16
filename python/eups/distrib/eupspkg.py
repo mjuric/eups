@@ -298,6 +298,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
                    Must be invoked from the root product directory.
        xfetch   -- run 'fetch' on the package contents found in ./_create.
                    The output is stored in ./_fetch
+       xclean   -- remove _create and _fetch directories.
 
     The following options to pkgbuild are provided as well:
     
@@ -315,7 +316,11 @@ class Distrib(eupsDistrib.DefaultDistrib):
     
        ./ups/pkgbuild xcreate PRODUCT=... VERSION=...
        
-    vs. 'env PRODUCT=... VERSION=... ./ups/pkgbuild xcreate'.
+    vs. 'env PRODUCT=... VERSION=... ./ups/pkgbuild xcreate'. Beware of
+    quoting issues when using this feature (eg.  pkgbuild xcreate
+    REPOSITORY_PATH='.../$PRODUCT.git|.../$PRODUCT.git' will not do what you
+    think it would, as the quotes will be expanded on the command line,
+    leaving pkgbuild to believe it's executing a pipe.
 
     Finally, there's a script named 'pkgbuild' in $EUPS_DIR/bin (and,
     therefore, on $PATH whenever eups is setup). It's a small wrapper that
