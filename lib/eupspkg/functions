@@ -651,6 +651,25 @@ xclean()
 	rm -rf _fetch _create
 }
 
+xall()
+{
+	#
+	# Run the full build + declare sequence for a package
+	#
+
+	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
+
+	setup -r .
+
+	pkgbuild -a -d prep
+	pkgbuild -a -d config
+	pkgbuild -a -d build
+	pkgbuild -a -d install
+	pkgbuild -a -d eups_declare
+
+	unsetup -r .
+}
+
 ##################### ---- INITIALIZATION ---- #####################
 
 #
@@ -685,7 +704,7 @@ fi
 # Source the pkginfo file
 #
 
-if [[ "$1" != "create" && "$1" != "xfetch" && "$1" != "xclean" ]]; then
+if [[ "$1" != "create" && "$1" != "xfetch" && "$1" != "xclean" && "$1" != "xall" ]]; then
 	if [[ ! -z "$PKGINFO" ]]; then
 		debug "sourcing pkginfo from PKGINFO='$PKGINFO'."
 		. "$PKGINFO"
