@@ -329,6 +329,9 @@ default_create()
 	case "$SOURCE" in
 		git)
 			# Use git clone to extract ups/pkgbuild. Store the SHA1 into $PKGINFO
+			# Note: this is terribly inefficient, but git doesn't provide a
+			# mechanism to just fetch a single file given a ref.
+
 			git clone -q "$REPOSITORY" tmp
 			(cd tmp && git checkout -q $GITREV)
 
@@ -336,18 +339,27 @@ default_create()
 			append_pkginfo SHA1
 
 			mkdir ups
-			mv tmp/ups/pkgbuild ups
+			if [[ -e tmp/ups/pkgbuild ]]; then
+				mv tmp/ups/pkgbuild ups
+			fi
 
 			rm -rf tmp
 			;;
 		git-archive)
 			# Extract ups/pkgbuild using git-archive
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild | (tar xzf - 2>/dev/null || true)
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild 2>/dev/null | (tar xzf - 2>/dev/null || true)
 			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
 			#       BSD tar returns success on broken pipe, gnu tar returns an error.
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
+				# The failure may have occurred because ups/ does not exist on the remote, or because
+				# of a problem with accessing the repository. The former is legal, the latter is not.
+				# Find out which one is it and act accordinly.
+				git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" | head -c 1 > /dev/null
+				if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+					die "could not access '$REPOSITORY' via git-archive. has it been tagged with '$VERSION'"?
+				fi
 			fi
+			mkdir -p ups
 			;;
 		"local")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
@@ -624,7 +636,8 @@ xfetch()
 	rm -rf _fetch
 	cp -a _create _fetch
 
-	(cd _fetch && ./ups/pkgbuild -v $VERBOSE fetch)
+	_PKGBUILD=$(test -f ./_fetch/ups/pkgbuild && echo "./ups/pkgbuild" || echo "$EUPS_DIR/lib/eupspkg/pkgbuild.default")
+	(cd _fetch && $_PKGBUILD -v $VERBOSE fetch)
 
 	msg "the result is in ./_fetch"
 }
@@ -700,3 +713,16 @@ PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory 
 
 CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
 PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}		# Options passed to setup.py install. Note that --prefix is NOT passed separately!
+
+if [[ -z "$PKGBUILD_SOURCE" ]]; then						# Fully qualified path to pkgbuild script.
+	# Last item of BASH_SOURCE is the top-level script we were invoked from
+	# Note: this will fail if the script was invoked using a relative path, and
+	# $PWD was changed in the meantime. The final statement tries to catch
+	# some of these.
+
+	_BS="${BASH_SOURCE[${#BASH_SOURCE[@]}-1]}"
+	PKGBUILD_SOURCE="$( cd "$( dirname $_BS )" && pwd )/$(basename "$_BS")"
+	if [[ ! -f "$PKGBUILD_SOURCE" ]]; then
+		die "failed to deduce the full path to this pkgbuild script. please rerun it using a full path."
+	fi
+fi

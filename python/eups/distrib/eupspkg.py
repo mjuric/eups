@@ -282,7 +282,6 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
 	# Prepare the string with all unrecognized options, to be passed to pkgbuild on the command line
 	# FIXME: This is not the right way to do it. -S options should be preserved in a separate dict()
-	print self.options
 	knownopts = {'config', 'nobuild', 'noclean', 'noaction', 'exact', 'allowIncomplete', 'buildDir', 'noeups', 'installCurrent' };
         self.qopts = " ".join( "%s=%s" % (k.upper(), pipes.quote(str(v))) for k, v in self.options.iteritems() if k not in knownopts )
 
@@ -365,7 +364,7 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         pkgbuild = os.path.join(baseDir, productDir, "ups", "pkgbuild")
         if not os.path.exists(pkgbuild):
             # Use the defalt build file
-            raise Exception("TODO: Implement default pkgbuild file facility.")
+            pkgbuild = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg', 'pkgbuild.default')
 
         # Construct the package in a temporary directory
         pkgdir = tempfile.mkdtemp(suffix='.eupspkg')
@@ -513,6 +512,12 @@ tar xzvf %(eupspkg)s
 PKGDIR="$(find . -maxdepth 1 -type d ! -name ".*" | head -n 1)"
 test ! -z $PKGDIR
 cd "$PKGDIR"
+
+# If ./ups/pkgbuild is not present, symlink in the default
+if [[ ! -e ./ups/pkgbuild ]]; then
+	mkdir -p ./ups
+	ln -s "$EUPS_DIR/lib/eupspkg/pkgbuild.default" ups/pkgbuild
+fi
 
 # eups setup the dependencies
 %(setups)s
