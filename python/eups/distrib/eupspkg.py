@@ -359,7 +359,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
 	# Prepare the string with all unrecognized options, to be passed to pkgbuild on the command line
 	# FIXME: This is not the right way to do it. -S options should be preserved in a separate dict()
-	knownopts = {'config', 'nobuild', 'noclean', 'noaction', 'exact', 'allowIncomplete', 'buildDir', 'noeups', 'installCurrent' };
+	knownopts = set(['config', 'nobuild', 'noclean', 'noaction', 'exact', 'allowIncomplete', 'buildDir', 'noeups', 'installCurrent']);
         self.qopts = " ".join( "%s=%s" % (k.upper(), pipes.quote(str(v))) for k, v in self.options.iteritems() if k not in knownopts )
 
     # @staticmethod   # requires python 2.4
