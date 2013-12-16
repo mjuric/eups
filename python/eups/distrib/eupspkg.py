@@ -30,7 +30,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
     These are invoked by EUPS, in sequence, from $pkgdir. For all verbs, the
     dependencies, as obtained from the manifest, will be setup-ed. 
     Additionally, for 'config', 'build', and 'install', the product itself
-    will be setup-ed (i.e., `setup --type=build -j -r .' will be executed in
+    will be setup-ed (i.e., `setup --type=build -k -r .' will be executed in
     $pkgdir).  All invocations are run from an auto-generated Bash script
     named $pkgdir/../build.sh; in case of build problems, the end-user can
     inspect and edit it (as well as ups/pkgbuild) as necessary.
@@ -39,6 +39,10 @@ class Distrib(eupsDistrib.DefaultDistrib):
     nor declare the product to EUPS upon successful completion of
     installation.  Note that this is different from the custom for EUPS'
     .build distribution mechanism.
+    
+    If the packager does not provide a pkgbuild script, a default one will
+    be used that provides implementations of all verbs for common build
+    systems (see below).
 
 
     When a package is being created using 'eups distrib create', the create
@@ -111,17 +115,41 @@ class Distrib(eupsDistrib.DefaultDistrib):
     
        . "$EUPS_DIR/lib/eupspkg/functions"
     
-       REPOSITORY="git://git.lsstcorp.org/LSST/DMS/devenv/$PRODUCT.git"
-    
        "$@"
        ================================================================
 
-    The script above sources the function library, followed by defining a
-    variable REPOSITORY (where the product source code will be found), and
-    ends with "$@", which will execute the verb passed in on the command
-    line.  The default verb implementations will use $REPOSITORY, as well as
-    other variables passed in by EUPS via the environment (discussed above)
-    to create or install the package (depending on which one is invoked).
+    The script above sources the function library, and ends with "$@", which
+    will execute the verb passed in on the command line.  The default verb
+    implementations will use $REPOSITORY_PATH, as well as other variables passed
+    in by EUPS via the environment (discussed above) to create or install
+    the package (depending on which one is invoked).
+    
+    The code above is the default implementation of pkgbuild that EUPS will
+    use unless the packager provides their own.  This enables completely
+    non-intrusive builds of eupspkg packages for repositories using standard
+    build systems/options.
+
+    
+    $REPOSITORY_PATH is a '|'-delimited path of patterns expanding to
+    repositories where the source may be found.  It should be specified via
+    a -S option to 'eups distrib create'.  An example of a typical
+    $REPOSITORY_PATH specification is as follows:
+ 
+       eups distrib create .... \
+         -S repository_path='git://server1/dir1/$PRODUCT|git://server2/dir2/$PRODUCT'
+
+
+    Note how elements of the path are separated by | (instead of the usual
+    colon). Secondly, note how the path has been enclosed in single quotes,
+    to prevent variable expansion on the command line. Finally, although
+    we've written it in lower case, the names of the variables passed in via
+    -S will be converted to upper case before being passed on to pkgbuild.
+
+    EUPS will construct a repository URL from each element of the path, and
+    test for its existence until a matching one is found.  Instead of using
+    matching via $REPOSITORY_PATH, the repository URL can be embedded into
+    the pkgbuild file itself by setting a variable named REPOSITORY.
+
 
     In the context of package creation, the default create verb
     implementation interprets the $SOURCE variable as the mechanism through
@@ -170,14 +198,15 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
        eups distrib create base 7.3.1.1_2_g3dd8623 \
           --server-dir=...serverDir... -f generic -d eupspkg \
-          -S source=git
+          -S source=git -S repository_path=....
 
     If '-S source' was not given, 'local' would be the default.
     
-    The default create verb implementation uses information from the command
-    line to construct the package.  It saves any information needed to later
-    build it (e.g., the $SHA1) to ./ups/pkginfo in the package itself.  To
-    restore it, this file is sourced by pkgbuild at 'eups distrib install' time.
+    The default create verb implementation uses the information from the
+    command line to construct the package.  It saves any information needed
+    to later build it (e.g., the $SHA1, or the resolved $REPOSITORY) to
+    ./ups/pkginfo in the package itself.  To restore it, this file is
+    sourced by pkgbuild at 'eups distrib install' time.
     
 
     On install, the default verb implementations will try to detect the
@@ -218,7 +247,9 @@ class Distrib(eupsDistrib.DefaultDistrib):
        $REPOSITORY              -- The URL to git repository with the
                                    source. Can use any protocol git
                                    understands (eg. git://, http://, etc.).
-                                   Must be specified.
+                                   If not specified, $REPOSITORY_PATH will
+                                   be searched for a match (and this is the
+                                   recommended usage).
        $CONFIGURE_OPTIONS       -- Options to be passed to ./configure (if
                                    autoconf is in used). Default:
                                    --prefix=$PREFIX
@@ -256,6 +287,47 @@ class Distrib(eupsDistrib.DefaultDistrib):
     present in the function library, including utilities and command line
     switches to help debugging. Browse through the library code to get a
     feel for it.
+
+
+    Debugging/Development support
+
+    To help with development of pkgbuild scripts, additional verbs are
+    provided by the default pkgbuild implementation:
+    
+       xcreate  -- create the package contents and place it into ./_create.
+                   Must be invoked from the root product directory.
+       xfetch   -- run 'fetch' on the package contents found in ./_create.
+                   The output is stored in ./_fetch
+
+    The following options to pkgbuild are provided as well:
+    
+       -a             -- auto-detect the product name and version, using git.
+                         The version will be a slightly mangled output of
+                         git-describe --always --dirty.
+       -d             -- do not run git-describe with --dirty when
+                         autodetecting the version with -a.
+       -v <verbosity> -- set verbosity level
+       -h             -- get help on available options.
+
+    As a convenience, the default implementation of
+    $EUPS_DIR/lib/eupspkg/functions will eval any arguments passed after the
+    verb, enabling constructs such as:
+    
+       ./ups/pkgbuild xcreate PRODUCT=... VERSION=...
+       
+    vs. 'env PRODUCT=... VERSION=... ./ups/pkgbuild xcreate'.
+
+    Finally, there's a script named 'pkgbuild' in $EUPS_DIR/bin (and,
+    therefore, on $PATH whenever eups is setup). It's a small wrapper that
+    dispatches the calls to ./ups/pkgbuild, if it exists, and to the default
+    EUPS-provided implementation otherwise. It allows the developer the
+    conveninece to write:
+    
+       pkgbuild -a xcreate
+       
+    in the root product directory and be confident it will work irrespective
+    of whether ./ups/pkgbuild or the default implementation is being used.
+
 
     Further Examples:
     
