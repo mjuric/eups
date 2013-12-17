@@ -504,7 +504,7 @@ default_build()
 		scons opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
 		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
-	elif [[ -f Makefile ]]; then
+	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
 		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f setup.py ]]; then
 		python setup.py build
@@ -533,7 +533,7 @@ default_install()
 	#
 	if [[ -f SConstruct ]]; then
 		scons opt=3 prefix="$PREFIX" version="$VERSION" install
-	elif [[ -f Makefile ]]; then
+	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
 		make prefix="$PREFIX" version="$VERSION"  $MAKE_INSTALL_TARGETS
 		install_ups
 	elif [[ -f setup.py ]]; then
@@ -740,7 +740,7 @@ MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation
 PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory to which the product will be installed
 
 CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
-PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--prefix $PREFIX"}		# Options passed to setup.py install. Note that --prefix is NOT passed separately!
+PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--home $PREFIX"}		# Options passed to setup.py install. Note that --home is NOT passed separately!
 
 if [[ -z "$PKGBUILD_SOURCE" ]]; then						# Fully qualified path to pkgbuild script.
 	# Last item of BASH_SOURCE is the top-level script we were invoked from
