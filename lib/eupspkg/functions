@@ -255,6 +255,19 @@ git_version()
 	echo $VERSION
 }
 
+_get_best_branch()
+{
+	# Find the branch where this commit is closest to the tip
+	#
+	# FIXME: if two branches have the same distance to the tip, and one
+	# of them is master, prefer master.
+	#
+	local _B
+	for _B in $(git branch --contains $1 | cut -b 3-); do
+		echo $(git rev-list $1..$_B | wc -l) $_B
+	done | sort -n -k1,1 | head -n 1 | cut -d' ' -f 2
+}
+
 deduce_version_using_git()
 {
 	# usage: deduce_version_using_git [--dirty] [ref=HEAD] [tag_pattern='[0-9]*']
@@ -322,24 +335,16 @@ deduce_version_using_git()
 		# finding the tag with the lowest version number when compared in
 		# per component (i.e., "naturally").
 
-		# Find all tags for commit pointed to by the tag found by
-		# git-describe, that begin with a digit.
+		# Find all tags for commit pointed to by the tag found by git-describe
+		# that match the same pattern
 		local TAGSHA1=$(git show-ref --tags -d "${RES[0]}" | grep '{}$' | cut -d' ' -f 1)
 		local TAGS=$(git show-ref --tags -d | grep "^$TAGSHA1" | sed 's|.* refs/tags/\(.*\)^{}|\1|' | glob_match "$TAG_PATTERN")
 	
 		# Find the "earliest" one
 		RES[0]=$(_earliest_version ${TAGS[@]})
 	else
-		# Failed to get a description; still try to be friendly and
-		# prepend branch name if it's on 'master' or 'next'
-
-		# Is this commit on on 'master' or 'next'?
-		local BRANCH=$(git branch --contains ${RES[0]} | cut -b 3- | grep -E '^(master|next)$')
-
-		#if [[ -z $BRANCH ]]; then
-		#	# Find the branch with the shortest name that this commit belongs to
-		#	BRANCH=$(git branch --contains ${RES[0]} | cut -b 3- | awk '{ print length($1) " " $0; }' | sort -n | head -n 1 | cut -d' ' -f 2 )
-		#fi
+		# Failed to get a description; still try to be friendly
+		local BRANCH=$(_get_best_branch ${RES[0]})
 
 		if [[ ! -z $BRANCH ]]; then
 			RES=($BRANCH "${RES[@]}")
