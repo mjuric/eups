@@ -10,6 +10,22 @@
 
 set -e
 
+##################### ---- UNIT TEST HELPERS ---- #####################
+
+ut()
+{
+	# usage: ut <code_to_evaluate> <op> <expected_result>
+	#
+	# evals code in $1 and uses $2 to compare it to $3
+
+	eval RES="$($1)"
+	if [ "$RES" $2 "$3" ]; then
+		echo "$@": ok.
+	else
+		echo "$@": FAILED.
+	fi
+}
+
 ##################### ---- UTILITY FUNCTIONS ---- #####################
 
 #
@@ -148,7 +164,8 @@ autoversion()
 
 		# Construct an EUPS-friendly version string based on git info
 		# Does not encode dependencies in version (no +N part)
-		VERSION="$(git describe --always $DIRTY_FLAG | tr - _)"
+		## VERSION="$(git describe --always $DIRTY_FLAG | tr - _)"
+		deduce_version_using_git $DIRTY_FLAG
 
 		msg "    auto-determined: PRODUCT=$PRODUCT"
 		msg "    auto-determined: VERSION=$VERSION"
@@ -156,6 +173,184 @@ autoversion()
 	else
 		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
 	fi
+}
+
+_lex_normalize()
+{
+	# Given a list of dot-separated versions, echo a two-column list
+	# where the first column is equal to, eg., sprintf "%10s%10s%10s" x,
+	# y, z for a tag x.y.z.  The columns are separated by '|'.  This
+	# makes it possible to compare the versions by lexicographically
+	# sorting on the first column.
+	#
+	# Returns via STDOUT
+
+	local tag
+	for tag in "$@"; do
+		IFS="."
+		local VC=( $tag )
+		unset IFS
+
+		local FORMAT="$(yes "%10s" 2>/dev/null | head -n ${#VC[@]} | tr -d '\n')"
+		local VH=$(printf "$FORMAT" "${VC[@]}")
+
+		echo "$VH|$tag"
+	done
+}
+
+_earliest_version()
+{
+	# Given a list of dot-separated versions, return the earliest one.
+	#
+	# Returns via STDOUT
+
+	_lex_normalize "$@" | sort -t '|' -k1,1 | head -n 1 | cut -d'|' -f 2
+}
+
+_ut_earliest_version()
+{
+	# Unit tests of _earliest_version()
+
+	ut "_earliest_version 1.1 1.1.0" == "1.1"
+	ut "_earliest_version 1.1.0 1.1.0" == "1.1.0"
+	ut "_earliest_version 1.2.3 1.2.2" == "1.2.2"
+	ut "_earliest_version 1.2.2 1.2.3" == "1.2.2"
+
+	ut "_earliest_version 1.2 1.2.3" == "1.2"
+	ut "_earliest_version 1.2.2 1.2.3 1.3" == "1.2.2"
+
+	ut "_earliest_version 1.2 1.2a" == "1.2"
+	ut "_earliest_version 1.2.1 1.2a.2" == "1.2.1"
+	ut "_earliest_version 1.2a.2 1.2a.1" == "1.2a.1"
+	ut "_earliest_version 1.2a.2 1.2b.1" == "1.2a.2"
+}
+
+_eups_compat_version()
+{
+	# Make a string "EUPS compatible" by removing illegal characters
+	# (anything other than alphanumerics, dot, and underscore).
+	#
+	# Returns via STDOUT
+
+	echo "$@" | tr -c -d '[0-9a-zA-z._]'
+}
+
+glob_match()
+{
+	# usage: glob_match <pattern>
+	#
+	# Match lines on STDIN against <pattern> and echo only those that
+	# match.
+
+	while read line; do
+		if [[ "$line" == $1 ]]; then
+			echo "$line"
+		fi
+	done
+}
+
+git_version()
+{
+	deduce_version_using_git "$@"
+	echo $VERSION
+}
+
+deduce_version_using_git()
+{
+	# usage: deduce_version_using_git [--dirty] [ref=HEAD] [tag_pattern='[0-9]*']
+	#
+	# Deduces a version identifier given a git ref.
+	#
+	# Applies the following logic:
+	#   * If ref is a tag, returns ref
+	#   * Otherwise, calls git-describe
+	#     * if there are no annotated tags to describe by, returns [branch_g]<sha1>[_dirty]
+	#     * otherwise, returns <tag>_g<sha1>[_dirty]
+	#
+	# If multiple tags are elegible to describe the ref, uses the one
+	# evaluating to the lowest version.
+	#
+	# If --dirty is given, ref must be empty
+	#
+	# Defines: $VERSION
+	#
+
+	# See if there's a --dirty option
+	local DIRTY=
+	if [[ $1 == --dirty ]]; then
+		DIRTY="--dirty"
+		shift
+	fi
+
+	local REF=$1
+
+	# Check if this ref is already a tag; if yes, we're done.
+	if git show-ref -q --verify refs/tags/"$REF"; then
+		VERSION=$(_eups_compat_version "$REF")
+		return
+	fi
+
+	# Get pattern defining eligible tags for git-describe
+	local TAG_PATTERN=${2:-'[0-9]*'}
+
+	# Ask git-describe to describe the ref in human friendly terms, and
+	# split the output on '-' sign. The result will be one of:
+	#  <tag>-<seq>-g<hash>[-dirty]
+	#  <hash>[-dirty]
+	# with -dirty present only if --dirty flag was passed to `git describe'
+	#
+	local RES=$(git describe $DIRTY --first-parent --always --long --abbrev=10 --match "$TAG_PATTERN" $REF)
+	if [[ -z $RES ]]; then
+		die "error getting version description from git."
+	fi
+
+
+	IFS="-"
+	local RES=($RES)
+	unset IFS
+
+	if [[ ${RES[1]} == "0" ]]; then
+		# Simplify it <seq> == 0
+		if [[ -z ${RES[3]} ]]; then	# drop <SHA> if not dirty
+			unset RES[2]
+		fi
+		unset RES[1]			# drop <seq>
+	elif [[ ${#RES[@]} -gt 2 ]]; then
+		# Succeeded at getting a description.
+		# workarounds: if there are multiple tags on the commit,
+		# git-describe will return a random one.  Work around this by
+		# finding the tag with the lowest version number when compared in
+		# per component (i.e., "naturally").
+
+		# Find all tags for commit pointed to by the tag found by
+		# git-describe, that begin with a digit.
+		local TAGSHA1=$(git show-ref --tags -d "${RES[0]}" | grep '{}$' | cut -d' ' -f 1)
+		local TAGS=$(git show-ref --tags -d | grep "^$TAGSHA1" | sed 's|.* refs/tags/\(.*\)^{}|\1|' | glob_match "$TAG_PATTERN")
+	
+		# Find the "earliest" one
+		RES[0]=$(_earliest_version ${TAGS[@]})
+	else
+		# Failed to get a description; still try to be friendly and
+		# prepend branch name if it's on 'master' or 'next'
+
+		# Is this commit on on 'master' or 'next'?
+		local BRANCH=$(git branch --contains ${RES[0]} | cut -b 3- | grep -E '^(master|next)$')
+
+		#if [[ -z $BRANCH ]]; then
+		#	# Find the branch with the shortest name that this commit belongs to
+		#	BRANCH=$(git branch --contains ${RES[0]} | cut -b 3- | awk '{ print length($1) " " $0; }' | sort -n | head -n 1 | cut -d' ' -f 2 )
+		#fi
+
+		if [[ ! -z $BRANCH ]]; then
+			RES=($BRANCH "${RES[@]}")
+			RES[1]="g${RES[1]}"
+		fi
+	fi
+
+	# Construct the (EUPS-compatible) version string
+	IFS="_" VERSION="${RES[*]}"
+	unset IFS
+	VERSION=$(_eups_compat_version "$VERSION")
 }
 
 version_to_git_rev()
@@ -580,6 +775,7 @@ default_usage()
 		  v : set verbosity level (-2 through +2, default 0)
 		  a : autodetect PRODUCT and VERSION using git
 		  d : don't detect for dirty working dir in autodetect
+		  f : proceed even if PRODUCT or VERSION are not defined
 		  h : show usage instructions
 
 		If run with 'create', the script will create './ups/pkginfo'
@@ -698,11 +894,12 @@ xall()
 #
 VERBOSE=${VERBOSE:-0}
 DIRTY_FLAG=${DIRTY_FLAG:-"--dirty"}
-while getopts ":v:had" opt; do
+while getopts ":v:hadf" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
 		a) AUTOVERSION=on ;;
 		d) DIRTY_FLAG="" ;;
+		f) FORCE=1 ;;
 		h) usage; exit; ;;
 		\?) die "Invalid option: -$OPTARG" ;;
 		:) die "Option -$OPTARG requires an argument." ;;
@@ -734,15 +931,11 @@ if [[ "$1" != "create" && "$1" != "xfetch" && "$1" != "xclean" && "$1" != "xall"
 		PKGINFO=ups/pkginfo
 		. "$PKGINFO"
 	elif [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
-		die "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined."
+		if [[ $FORCE -ne 1 ]]; then
+			die "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined."
+		fi
 	fi
 fi
-
-#
-# UNDOCUMENTED FEATURE: eval command line overrides (typically variable
-# definitions; VAR1=A VAR2=B ...)
-#
-eval "${@:2}"
 
 #
 # Try to figure out how many cores does this machine have, and tweak
