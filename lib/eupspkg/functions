@@ -12,6 +12,12 @@ set -e
 
 ##################### ---- UNIT TEST HELPERS ---- #####################
 
+ut0()
+{
+	local STR="$@"
+	printf "%-45s : " "$STR" 1>&2
+}
+
 ut()
 {
 	# usage: ut <code_to_evaluate> <op> <expected_result>
@@ -20,9 +26,9 @@ ut()
 
 	eval RES="$($1)"
 	if [ "$RES" $2 "$3" ]; then
-		echo "$@": ok.
+		echo "\$($1) $2 '$3': ok."
 	else
-		echo "$@": FAILED.
+		echo "\$($1) $2 '$3': FAILED (lhs: $RES)."
 	fi
 }
 
@@ -257,15 +263,211 @@ git_version()
 
 _get_best_branch()
 {
-	# Find the branch where this commit is closest to the tip
+	# Usage: _get_best_branch <ref> <sha1>
 	#
-	# FIXME: if two branches have the same distance to the tip, and one
-	# of them is master, prefer master.
+	# If commit $1 is on the currently checked out branch,
+	# return it as best.
 	#
+	# If it's on master, return master as best.
+	#
+	# Otherwise, return the branch where $1 is the closest to the tip.
+	#
+	local REF="$1"
+	local SHA1="$2"
+	
+	if git show-ref -q --verify refs/heads/"$REF"; then
+		echo "$REF"
+		return
+	fi
+
+	local CUR_BRANCH=$(git symbolic-ref -q HEAD | sed 's,refs/heads/,,')
+
+	# (*) the 'grep -v' bit is there since git branch --contains lists the detached
+	# head as a "branch" containing the commit, eg:
+	#
+	#   [mjuric@lsst-dev A (81fdb1f...)]$ git branch --contains 81fdb1fde3 | cut -b 3-
+	#   (detached from 81fdb1f)
+	#   next
+	#   next2
+	local BRANCHES=$(git branch --contains $SHA1 | cut -b 3- | grep -v '^(')
+
+	# is it on current branch?
 	local _B
-	for _B in $(git branch --contains $1 | cut -b 3-); do
-		echo $(git rev-list $1..$_B | wc -l) $_B
+	for _B in ${BRANCHES[@]}; do
+		case "$_B" in
+			$CUR_BRANCH)	echo $CUR_BRANCH; return ;;
+			master)		local _IN_MASTER=1 ;;
+		esac
+	done
+
+	# Is it on master?
+	if [[ $_IN_MASTER == 1 ]]; then
+		echo master;
+		return
+	fi
+
+	# return the branch where this commit is closest to the tip
+	for _B in ${BRANCHES[@]}; do
+		echo $(git rev-list $SHA1..$_B | wc -l) $_B
 	done | sort -n -k1,1 | head -n 1 | cut -d' ' -f 2
+}
+
+_git_create_repo()
+{
+	mkdir $1
+	cd $1
+	git init > /dev/null
+}
+
+_git_add_commit()
+{
+	for _F in "$@"; do
+		echo "$_F" >> "$_F"
+	done
+	git add "$@" > /dev/null
+	git commit -a -m "Added files" > /dev/null
+}
+
+_ut_deduce_version_using_git()
+{
+	# unit test for deduce_version_using_git()
+	(
+		set +e
+
+		local D="$(mktemp -d -t unittest.XXXXX)"
+		cd "$D"
+		msg Running unut tests in $PWD
+
+		(
+			ut0 Version w/o no tag
+			_git_create_repo A
+			_git_add_commit README
+			COMMIT0=$(git rev-parse --short=10 HEAD)
+			_git_add_commit README
+			ut "git_version --dirty" == "master_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Version on dirty commit
+			echo "stuff" >> README
+			ut "git_version --dirty" == "master_g$(git rev-parse --short=10 HEAD)_dirty"
+			git reset --hard -q
+
+			ut0 Version for commit on branch
+			git checkout -q -b next
+			_git_add_commit next
+			ut "git_version --dirty" == "next_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Version for commit on two branches
+			git checkout -q master
+			ut "git_version --dirty" == "master_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 "Version for commit on branch (2)"
+			git checkout -q next
+			git checkout -q -b next2
+			_git_add_commit next2
+			ut "git_version --dirty" == "next2_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 "Branch name with reserved characters"
+			git checkout -q next
+			git checkout -q -b a/b/c/d
+			_git_add_commit next3
+			ut "git_version --dirty" == "abcd_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Prefer branch with closest tip
+			git checkout -q --detach next2^
+			ut "git_version --dirty" == "next_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Version on dirty commit
+			echo "stuff" >> README
+			ut "git_version --dirty" == "next_g$(git rev-parse --short=10 HEAD)_dirty"
+			git reset --hard -q
+
+			ut0 Ver from branch name
+			ut "git_version next" == "next_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Ver from SHA1, non-tip
+			ut "git_version $COMMIT0" == "master_g$COMMIT0"
+
+			ut0 Ver from SHA1, tip
+			ut "git_version $(git rev-parse --short=10 a/b/c/d)" == "abcd_g$(git rev-parse --short=10 a/b/c/d)"
+
+			ut0 "Ver from SHA1 on merge pt (HEAD is next2)"
+			next2sha=$(git rev-parse --short=10 next2)
+			abcdsha=$(git rev-parse --short=10 a/b/c/d)
+			git checkout -q next2
+			git merge a/b/c/d -m "Merged!" >/dev/null
+			git checkout -q a/b/c/d
+			git merge -q next2 >/dev/null
+			git checkout -q next2
+			ut "git_version $(git rev-parse --short=10 HEAD)" == "next2_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 "Ver from SHA1 on merge pt (HEAD is a/b/c/d)"
+			git checkout -q a/b/c/d
+			ut "git_version $(git rev-parse --short=10 HEAD)" == "abcd_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 "Ver from name on merge pt (HEAD is a/b/c/d)"
+			ut "git_version next2" == "next2_g$(git rev-parse --short=10 HEAD)"
+
+			# return the tree to pre-merged state
+			git checkout -q next2
+			git reset --hard $next2sha >/dev/null
+			git checkout -q a/b/c/d
+			git reset --hard $abcdsha >/dev/null
+
+
+			ut0 Single non-annotated tag on HEAD
+			git checkout -q master
+			git tag 1.0
+			ut "git_version --dirty" == "master_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Annotated and non-annotated tags on HEAD
+			git tag -a 2.0 -m "Version 2.0"
+			ut "git_version --dirty" == "2.0"
+			
+			ut0 Added lower version tag on the same commit
+			git tag -a 1.1 -m "Version 1.1"
+			ut "git_version --dirty" == "1.1"
+
+			ut0 Added higher version tag on the same commit
+			git tag -a 2.1 -m "Version 2.1"
+			ut "git_version --dirty" == "1.1"
+
+			ut0 Requesting version for tag returns tag
+			ut "git_version 2.1" == "2.1"
+
+			ut0 Dirty commit on the tag
+			echo "stuff" >> README
+			ut "git_version --dirty" == "1.1_dirty"
+
+			ut0 Commit away from the tag
+			_git_add_commit newfile
+			ut "git_version --dirty" == "1.1_1_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Commit away from the tag
+			_git_add_commit newfile2
+			ut "git_version --dirty" == "1.1_2_g$(git rev-parse --short=10 HEAD)"
+
+			ut0 Dirty commit away from the tag
+			echo "stuff" >> newfile2
+			ut "git_version --dirty" == "1.1_2_g$(git rev-parse --short=10 HEAD)_dirty"
+			git reset --hard -q
+
+
+			ut0 Tag on a side-branch
+			git checkout -q next2
+			_git_add_commit newfile2
+			git tag -a 3.0 -m "Version 3.0"
+			ut "git_version --dirty" == "3.0"
+			
+			ut0 Where --first-parent makes a difference
+			git checkout -q master > /dev/null
+			git merge next2 -m "Merge" > /dev/null
+			ut "git_version --dirty" == "1.1_3_g$(git rev-parse --short=10 HEAD)"
+
+			#git log --decorate --oneline --graph --all
+			#git describe
+			#git describe --first-parent
+		)
+	)
 }
 
 deduce_version_using_git()
@@ -317,16 +519,13 @@ deduce_version_using_git()
 		die "error getting version description from git."
 	fi
 
-
 	IFS="-"
 	local RES=($RES)
 	unset IFS
 
 	if [[ ${RES[1]} == "0" ]]; then
 		# Simplify it <seq> == 0
-		if [[ -z ${RES[3]} ]]; then	# drop <SHA> if not dirty
-			unset RES[2]
-		fi
+		unset RES[2]			# drop <sha1>
 		unset RES[1]			# drop <seq>
 	elif [[ ${#RES[@]} -gt 2 ]]; then
 		# Succeeded at getting a description.
@@ -338,13 +537,19 @@ deduce_version_using_git()
 		# Find all tags for commit pointed to by the tag found by git-describe
 		# that match the same pattern
 		local TAGSHA1=$(git show-ref --tags -d "${RES[0]}" | grep '{}$' | cut -d' ' -f 1)
-		local TAGS=$(git show-ref --tags -d | grep "^$TAGSHA1" | sed 's|.* refs/tags/\(.*\)^{}|\1|' | glob_match "$TAG_PATTERN")
+		local TAGS=$(git show-ref --tags -d | grep "^$TAGSHA1" | sed -n 's|.* refs/tags/\(.*\)^{}|\1|p' | glob_match "$TAG_PATTERN")
 	
 		# Find the "earliest" one
 		RES[0]=$(_earliest_version ${TAGS[@]})
 	else
 		# Failed to get a description; still try to be friendly
-		local BRANCH=$(_get_best_branch ${RES[0]})
+		
+		# Check if the ref that was passed in was a branch
+		if git show-ref -q --verify refs/heads/"$REF"; then
+			local BRANCH="$REF"
+		else
+			local BRANCH=$(_get_best_branch "$REF" ${RES[0]})
+		fi
 
 		if [[ ! -z $BRANCH ]]; then
 			RES=($BRANCH "${RES[@]}")
@@ -973,3 +1178,5 @@ if [[ -z "$PKGBUILD_SOURCE" ]]; then						# Fully qualified path to pkgbuild scr
 		die "failed to deduce the full path to this pkgbuild script. please rerun it using a full path."
 	fi
 fi
+
+_ut_deduce_version_using_git; exit -1
