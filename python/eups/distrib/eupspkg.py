@@ -437,6 +437,9 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         distid = self.getDistIdForPackage(product, version)
         distid = "eupspkg:%s-%s.eupspkg" % (product, version)
 
+        # Make sure it's an absolute path
+        serverDir = os.path.abspath(serverDir)
+
         (baseDir, productDir) = self.getProductInstDir(product, version, flavor)
         pkgbuild = os.path.join(baseDir, productDir, "ups", "pkgbuild")
         if not os.path.exists(pkgbuild):
@@ -444,7 +447,10 @@ EUPSPKG_URL = %(base)s/products/%(path)s
             pkgbuild = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg', 'pkgbuild.default')
 
         # Construct the package in a temporary directory
-        pkgdir = tempfile.mkdtemp(suffix='.eupspkg')
+        pkgdir0 = tempfile.mkdtemp(suffix='.eupspkg')
+        prodSubdir = "%s-%s" % (product, version)
+        pkgdir = os.path.join(pkgdir0, prodSubdir)
+        os.mkdir(pkgdir)
 
         q = pipes.quote
         try:
@@ -481,17 +487,16 @@ EUPSPKG_URL = %(base)s/products/%(path)s
                     print >> self.log, "Writing", tfn
 
                 try:
-                    tf = tarfile.open(tfn, mode='w:gz')
-                    tf.add(pkgdir, arcname="%s-%s" % (product, version))
-                    tf.close()
-                except IOError, param:
+                    cmd = 'cd %s && tar czf %s %s' % (q(pkgdir0), q(tfn), q(prodSubdir))
+                    eupsServer.system(cmd)
+                except OSError, e:
                     try:
                         os.unlink(tfn)
                     except OSError:
                         pass                        # probably didn't exist
-                    raise RuntimeError ("Failed to write %s: %s" % (tfn, param))
+                    raise RuntimeError ("Failed to write %s: %s" % (tfn, e))
         finally:
-            shutil.rmtree(pkgdir)
+            shutil.rmtree(pkgdir0)
 
         return distid
 
