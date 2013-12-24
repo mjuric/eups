@@ -5,6 +5,7 @@ SUBDIRS=eupspkg
 all :;
 
 install :
+	cp bunit.sh "$(EUPS_DIR)/lib"
 	@ for f in $(SUBDIRS); do \
 		(\
 		   if [ ! -d $(EUPS_DIR)/$$f ]; then mkdir $(EUPS_DIR)/lib/$$f; fi; \
