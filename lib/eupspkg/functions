@@ -56,24 +56,6 @@ append_pkginfo()
 	info "appended $1='$VAL_' to pkginfo."
 }
 
-use_parallel_jobs()
-{
-	# Tweak MAKEFLAGS and SCONSFLAGS to run at the given level of parallelism
-	#
-	# usage: use_parallel_jobs <NJOBS>
-	#
-	NJOBS=$1
-
-	# Note: If this function is called multiple times, last -j option will take presedence.
-	# Not elegant, but works.
-	export MAKEFLAGS="$SCONSFLAGS -j $NJOBS"
-	export SCONSFLAGS="$SCONSFLAGS -j $NJOBS"
-
-	debug "using $NJOBS parallel jobs."
-	debug "  MAKEFLAGS=$MAKEFLAGS"
-	debug "  SCONSFLAGS=$SCONSFLAGS"
-}
-
 detect_compiler()
 {
 	#
@@ -505,11 +487,11 @@ default_build()
 	# Attempt to autodetect the build system
 	#
 	if [[ -f SConstruct ]]; then
-		scons opt=3 prefix="$PREFIX" version="$VERSION"
+		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION"
 	elif [[ -f configure ]]; then
-		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
+		make -j$NJOBS prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
-		make prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
+		make -j$NJOBS prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f setup.py ]]; then
 		python setup.py build
 	else
@@ -536,9 +518,12 @@ default_install()
 	# Attempt to autodetect the build system
 	#
 	if [[ -f SConstruct ]]; then
-		scons opt=3 prefix="$PREFIX" version="$VERSION" install
+		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION" install
+	elif [[ -f configure ]]; then
+		make -j$NJOBS $MAKE_INSTALL_TARGETS
+		install_ups
 	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
-		make prefix="$PREFIX" version="$VERSION"  $MAKE_INSTALL_TARGETS
+		make -j$NJOBS prefix="$PREFIX" version="$VERSION"  $MAKE_INSTALL_TARGETS
 		install_ups
 	elif [[ -f setup.py ]]; then
 		PYDEST="$PREFIX/lib/python"
@@ -686,10 +671,10 @@ xmake()
 
 	setup -r .
 
-	pkgbuild -a -d prep
-	pkgbuild -a -d config
-	pkgbuild -a -d build
-	pkgbuild -a -d install
+	pkgbuild -a -d -v $VERBOSE prep
+	pkgbuild -a -d -v $VERBOSE config
+	pkgbuild -a -d -v $VERBOSE build
+	pkgbuild -a -d -v $VERBOSE install
 
 	unsetup -r .
 }
@@ -704,11 +689,12 @@ xall()
 
 	setup -r .
 
-	pkgbuild -a -d prep
-	pkgbuild -a -d config
-	pkgbuild -a -d build
-	pkgbuild -a -d install
-	pkgbuild -a -d eups_declare
+	pkgbuild -a -d -v $VERBOSE prep
+	pkgbuild -a -d -v $VERBOSE config
+	pkgbuild -a -d -v $VERBOSE build
+	pkgbuild -a -d -v $VERBOSE install
+
+	pkgbuild -a -d -v $VERBOSE eups_declare
 
 	unsetup -r .
 }
@@ -790,13 +776,9 @@ if [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
 	fi
 fi
 
-#
-# Try to figure out how many cores does this machine have, and tweak
-# MAKEFLAGS and SCONSFLAGS accordingly
-#
-use_parallel_jobs $((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)
-
 ##################### ---- Defaults ---- #####################
+
+NJOBS=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)   # number of cores on the machine (Darwin & Linux)
 
 SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
