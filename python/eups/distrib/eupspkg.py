@@ -456,10 +456,11 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         try:
             # Execute 'pkgbuild <create>'
             cmd = ("cd %(pkgdir)s && " + \
-                "PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s %(qopts)s " + \
-                "%(pkgbuild)s create") % \
+                "%(pkgbuild)s   PREFIX=%(prefix)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s %(qopts)s" + \
+                " create") % \
                     {
                       'pkgdir':   q(pkgdir),
+                      'prefix':   q(os.path.join(baseDir, productDir)),
                       'product':  q(product),
                       'version':  q(version),
                       'flavor':   q(flavor),
@@ -605,10 +606,10 @@ fi
 %(setups)s
 
 # fetch package source
-( %(qopts)s ./ups/pkgbuild fetch ) || exit -1
+( ./ups/pkgbuild %(qopts)s fetch ) || exit -1
 
 # prepare for build (eg., apply platform-specific patches)
-( %(qopts)s ./ups/pkgbuild prep  ) || exit -2
+( ./ups/pkgbuild %(qopts)s prep  ) || exit -2
 
 # setup the package being built. note we're using -k
 # to ensure setup-ed dependencies aren't overridden by
@@ -618,9 +619,9 @@ fi
 setup --type=build -k -r .
 
 # configure, build, and install
-( %(qopts)s ./ups/pkgbuild config  ) || exit -3
-( %(qopts)s ./ups/pkgbuild build   ) || exit -4
-( %(qopts)s ./ups/pkgbuild install ) || exit -5
+( ./ups/pkgbuild %(qopts)s config  ) || exit -3
+( ./ups/pkgbuild %(qopts)s build   ) || exit -4
+( ./ups/pkgbuild %(qopts)s install ) || exit -5
 """ 			% {
                         'buildDir' : q(buildDir),
                         'eupspkg' : q(tfname),

@@ -69,7 +69,7 @@ use_parallel_jobs()
 	export MAKEFLAGS="$SCONSFLAGS -j $NJOBS"
 	export SCONSFLAGS="$SCONSFLAGS -j $NJOBS"
 
-	info "Using $NJOBS parallel jobs."
+	debug "using $NJOBS parallel jobs."
 	debug "  MAKEFLAGS=$MAKEFLAGS"
 	debug "  SCONSFLAGS=$SCONSFLAGS"
 }
@@ -129,64 +129,42 @@ detect_compiler()
 	COMPILER_TYPE="$CXX_COMP_TYPE"
 }
 
-autoversion()
+autoproduct()
 {
-	# Heuristics to guess PRODUCT/VERSION, assuming we were called from
-	# a working directory of a git repository.
-	#
-	# This exists primarily to enable debugging.
-	if hash git 2>/dev/null; then
-		msg "using git heuristics to deduce pkginfo contents."
+	# Guess PRODUCT, assuming we were called from a working directory of
+	# a git repository.
 
-		FLAVOR=generic
-		REMOTE=$(git config --get remote.origin.url || true)
-		if [[ -z "$REMOTE" ]]; then
-			die "No git remote named 'origin', or git error.";
-		fi
-
-		PRODUCT="$(basename "$REMOTE" .git)"
-
-		# Construct an EUPS-friendly version string based on git info
-		# Does not encode dependencies in version (no +N part)
-		## VERSION="$(git describe --always $DIRTY_FLAG | tr - _)"
-		##deduce_version_using_git $DIRTY_FLAG
-		VERSION="$(pkgautoversion $DIRTY_FLAG)"
-
-		msg "    auto-determined: PRODUCT=$PRODUCT"
-		msg "    auto-determined: VERSION=$VERSION"
-		msg "    assumed:         FLAVOR=$FLAVOR"
-	else
+	if ! hash git 2>/dev/null; then
 		die "could not execute 'git' to automatically deduce PRODUCT and VERSION."
 	fi
+
+	local REMOTE=$(git config --get remote.origin.url || true)
+	if [[ -z "$REMOTE" ]]; then
+		die "No git remote named 'origin', or git error. Please specify PRODUCT.";
+	fi
+
+	PRODUCT="$(basename "$REMOTE" .git)"
+	msg "guessed PRODUCT='$PRODUCT'"
 }
 
-version_to_git_rev()
+autoversion()
 {
-	# Parse a git SHA out of the version, that can be pulled with git-clone
-	#
-	# Assume the versions are of the form:
-	#
-	#    <tag>:<n>:<sha1>:[dirty][+...]
-	#
-	# If the version can't be parsed, return it as-is (it may be a tag).
-	#
-	# Defines: GITREV
+	# Guess VERSION, assuming we were called from a working directory of
+	# a git repository.
+
+	VERSION="$(pkgautoversion $1)"
+	msg "guessed VERSION='$VERSION'"
+}
+
+version_to_gitrev()
+{
+	# Convert VERSION to a git revision that can be pulled with
+	# git-clone by removing anything past the first '+', and
+	# converting any _ to -.
 	#
 
-	#VERSION="6.2.0.0:10:g4707c82"
-	#VERSION="4707c82:dirty"
-
-	local VER=$(echo "$VERSION" | cut -d+ -f 1)
-	local SHA=$(echo "$VER" | cut -d: -f 3)
-	local NF=$(echo "$VER" | grep -o : | wc -l)
-
-	if [[ $NF -ne 2 || "${SHA:0:1}" != "g" || "$VER" = *:dirty ]]; then
-		GITREV="$(echo "$VER" | tr _ -)"
-	else
-		GITREV=${SHA:1}
-	fi
-	#echo GITREV=$GITREV VER=$VER NF=$NF
-	#exit -1
+	local V=${VERSION%%+*}		# remove everything past first + (incl. the '+')
+	echo ${V//_/-}			# convert all _ to -
 }
 
 eups_declare()
@@ -254,8 +232,8 @@ resolve_repository()
 {
 	#
 	# Resolve the path to git repository, by expanding patterns
-	# specified on RESOLVE_PATH.  If $REPOSITORY has already been
-	# explicitly set, do nothing.
+	# specified on the RESOLVE_PATH.  If unsuccessful, but $REPOSITORY
+	# is not empty, use that.  Otherwise, die.
 	#
 	# RESOLVE_PATH must be of the form:
 	#
@@ -267,24 +245,38 @@ resolve_repository()
 	# Defines: REPOSITORY
 	#
 
-	if [[ ! -z "$REPOSITORY" ]]; then
-		info explicit repository given as $REPOSITORY, nothing to resolve.
-		return
-	fi
-	
-	die_if_empty REPOSITORY_PATH
-
 	IFS='|' read -ra REPOSITORY_PATH_ARRAY <<< "$REPOSITORY_PATH"
 	for PAT in "${REPOSITORY_PATH_ARRAY[@]}"; do
-		eval "REPOSITORY=\"$PAT\""
-		info "trying $REPOSITORY"
-		if git ls-remote "$REPOSITORY" master >/dev/null 2>&1; then
-			info "repository resolved to $REPOSITORY."
+		eval "_REPOSITORY=\"$PAT\""
+		info "trying $_REPOSITORY"
+		if git ls-remote "$_REPOSITORY" master >/dev/null 2>&1; then
+			info "repository resolved to $_REPOSITORY."
+			REPOSITORY="$_REPOSITORY"
 			return
 		fi
 	done
 
-	die "failed to resolve repository for $PRODUCT-$VERSION using REPOSITORY_PATH=$REPOSITORY_PATH. Check the path or accessibility of your git repositories."
+	if [[ -z "$REPOSITORY" ]]; then
+		die "failed to resolve repository for $PRODUCT-$VERSION using REPOSITORY_PATH='$REPOSITORY_PATH'. Check the path or accessibility of your git repositories."
+	fi
+
+	info "using predefined REPOSITORY='$REPOSITORY'"
+}
+
+contains()
+{
+	#
+	# usage: contains <needle> <haystack[1]> [haystack[2]] ...
+	#
+
+	local _N="$1"
+	shift
+
+	for _H in "${@}"; do
+		[[ $_N == $_H ]] && return 0
+	done
+
+	return 250
 }
 
 ##################### ---- DEFAULT VERB IMPL ---- #####################
@@ -325,7 +317,8 @@ default_create()
 	# Prepare the package
 	resolve_repository
 
-	version_to_git_rev
+	# Use any SHA1 that was passed in (from pkginfo or command line), or version
+	GITREV=${SHA1:-$(version_to_gitrev)}
 
 	case "$SOURCE" in
 		git)
@@ -417,8 +410,6 @@ default_fetch()
 
 	die_if_empty PRODUCT
 	die_if_empty VERSION
-
-	version_to_git_rev
 
 	case "$SOURCE" in
 		git)
@@ -586,30 +577,29 @@ default_usage()
 	cat <<-"EOF"
 		pkgbuild -- EupsPkg builder script
 
-		usage: pkgbuild [-ha] [-v verbosity] verb
+		usage: pkgbuild [-dh] [-v level] [VAR1=..] [VAR2=..] verb
 
 		  verb  : one of create, fetch, prep, config, build, install
 
-		  v : set verbosity level (-2 through +2, default 0)
-		  a : autodetect PRODUCT and VERSION using git
-		  d : don't detect for dirty working dir in autodetect
-		  f : proceed even if PRODUCT or VERSION are not defined
+		  v : set verbosity level (-2 through +3, default 0)
+		  d : don't check for dirty working dir in version autodet.
 		  h : show usage instructions
 
 		If run with 'create', the script will create './ups/pkginfo'
 		with package configuration, as well as prepare the package
-		depending on the chosen SOURCE.
+		depending on the chosen SOURCE.  Any existing
+		$PREFIX/ups/pkginfo will be sourced to deduce REPOSITORY and
+		SHA1.
 
 		If run with any other verb, the script will look for
-		'./ups/pkginfo' to source the configuration.  This location
-		can be overridden via the PKGINFO environment variable.  If
-		neither is given, the script will assume the configuration
-		is passed via the environment.
+		'./ups/pkginfo' to source the configuration.  If it does not
+		exist, the script will assume the configuration is passed
+		via the environment and attempt to guess PRODUCT and VERSION
+		using git.
 
-		If -a is given a crude auto-detection algorithm will be
-		employed to deduce PRODUCT and VERSION from git. This is
-		primarily for debugging, and should _never_ be used to
-		install packages.
+		Variables can be passed on the command line, after the
+		options and before the verb.  These override any from the
+		environment or pkginfo.
 
 EOF
 }
@@ -619,7 +609,7 @@ EOF
 #
 create()  { default_create "$@"; }
 fetch()   { default_fetch "$@"; }
-prep()   { default_prep "$@"; }
+prep()    { default_prep "$@"; }
 config()  { default_config "$@"; }
 build()   { default_build "$@"; }
 install() { default_install "$@"; }
@@ -635,7 +625,7 @@ xcreate()
 	#
 	# Typical usage:
 	#
-	#    ./ups/pkgbuild -a xcreate
+	#    ./ups/pkgbuild xcreate
 	#
 	# and the result will be in _create
 	#
@@ -726,16 +716,14 @@ xall()
 ##################### ---- INITIALIZATION ---- #####################
 
 #
-# Parse command line arguments
+# Parse command line options
 #
 VERBOSE=${VERBOSE:-0}
 DIRTY_FLAG=${DIRTY_FLAG:-"--dirty"}
 while getopts ":v:hadf" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
-		a) AUTOVERSION=on ;;
 		d) DIRTY_FLAG="" ;;
-		f) FORCE=1 ;;
 		h) usage; exit; ;;
 		\?) die "Invalid option: -$OPTARG" ;;
 		:) die "Option -$OPTARG requires an argument." ;;
@@ -743,33 +731,62 @@ while getopts ":v:hadf" opt; do
 done
 shift $((OPTIND-1))
 
-if [[ "$AUTOVERSION" == on ]]; then
-	autoversion
-fi
+# Peek if PREFIX or VERBOSE were given on the command line (to correctly
+# find pkginfo). Inelegant, but effective...
+for _V in "$@"; do
+	[[ ! $_V =~ [A-Za-z0-9_]+=.* ]] && break	# stop on first non-assignment
+	[[ ! $_V =~ (PREFIX|VERBOSE)=.* ]] && continue	# skip all but PREFIX and VERBOSE
+
+	_KEY="${_V%%=*}"
+	_VAL="${_V#*=}"
+	eval "$_KEY='$_VAL'"
+done
 
 #
 # Debug level 3 activates tracing
 #
 [[ $VERBOSE -ge 3 ]] && set -x
 
-[[ $# -ge 1 ]] || { error "insufficient number of arguments [$0 "$@"]."; usage; exit -1; }
-
 #
 # Source the pkginfo file
 #
+# EupsPkg API: PREFIX will be set when 'create' is called, pointing to the installed package
+# pkgbuild uses it to locate pkginfo (assumes . as the default)
+if [[ -f "${PREFIX:-.}/ups/pkginfo" ]]; then
+	debug "found pkginfo in ${PREFIX:-.}/ups/pkginfo."
+	. "${PREFIX:-.}/ups/pkginfo"
+fi
 
-if [[ "$1" != "create" && "$1" != "xfetch" && "$1" != "xclean" && "$1" != "xall" && "$1" != "xmake" ]]; then
-	if [[ ! -z "$PKGINFO" ]]; then
-		debug "sourcing pkginfo from PKGINFO='$PKGINFO'."
-		. "$PKGINFO"
-	elif [[ -f ups/pkginfo ]]; then
-		debug "detected pkginfo in ups/pkginfo."
-		PKGINFO=ups/pkginfo
-		. "$PKGINFO"
-	elif [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
-		if [[ $FORCE -ne 1 ]]; then
-			die "no './ups/pkginfo' file, and PKGINFO, PRODUCT nor VERSION are defined."
-		fi
+#
+# Variables can be set on the command line, to override anything already in
+# the environment or (more interestingly) set via pkginfo. Set them here.
+#
+while [[ $1 =~ [A-Za-z0-9_]+=.* ]]; do
+	_KEY="${1%%=*}"
+	_VAL="${1#*=}"
+	eval "$_KEY='$_VAL'"
+	shift
+done
+
+# OK with the remaining number of arguments?
+[[ $# -ge 1 ]] || { error "insufficient number of arguments."; usage; exit -1; }
+
+#
+# Set up the key variables, but refuse to do it for EupsPkg API verbs where
+# we expect them to be set explicitly.  Also skip auto* for some x* verbs
+# where we know it's not needed.
+#
+EUPSPKPG_VERBS="create fetch prep config build install"
+NOVERCHECK_VERBS="xfetch xclean"
+if ! contains "$1" $EUPSPKG_VERBS $NOVERCHECK_VERBS; then
+	[ -z "$PRODUCT" ] && autoproduct
+	[ -z "$VERSION" ] && autoversion $DIRTY_FLAG
+	FLAVOR=${FLAVOR:-generic}
+fi
+
+if [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
+	if ! contains "$1" $NOVERCHECK_VERBS; then
+		die "PRODUCT or VERSION were not defined. refusing to proceed."
 	fi
 fi
 
@@ -792,15 +809,3 @@ PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory 
 CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
 PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--home $PREFIX"}		# Options passed to setup.py install. Note that --home is NOT passed separately!
 
-if [[ -z "$PKGBUILD_SOURCE" ]]; then						# Fully qualified path to pkgbuild script.
-	# Last item of BASH_SOURCE is the top-level script we were invoked from
-	# Note: this will fail if the script was invoked using a relative path, and
-	# $PWD was changed in the meantime. The final statement tries to catch
-	# some of these.
-
-	_BS="${BASH_SOURCE[${#BASH_SOURCE[@]}-1]}"
-	PKGBUILD_SOURCE="$( cd "$( dirname $_BS )" && pwd )/$(basename "$_BS")"
-	if [[ ! -f "$PKGBUILD_SOURCE" ]]; then
-		die "failed to deduce the full path to this pkgbuild script. please rerun it using a full path."
-	fi
-fi
