@@ -585,7 +585,7 @@ cd %(buildDir)s
 
 # sanitize the environment: unsetup any packages that were setup-ed
 for pkg in $(eups list -s | cut -d' ' -f 1); do
-	unsetup "$pkg"
+	unsetup -j "$pkg"
 done
 
 # Unpack the eupspkg tarball
