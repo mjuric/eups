@@ -149,25 +149,6 @@ version_to_gitrev()
 	echo ${V//_/-}			# convert all _ to -
 }
 
-eups_declare()
-{
-	# Make the package known to EUPS
-	#
-	# NOTE: This function is not a part of the "official" API; it's here just
-	# to ease debugging.
-
-	die_if_empty PRODUCT
-	die_if_empty VERSION
-
-	# Sanity checks
-	if [[ ! -d "$PREFIX/ups" ]]; then
-		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
-	fi
-
-	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
-	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
-}
-
 install_ups()
 {
 	# Copy the contents of ups/ to $PREFIX/ups and expand the table files
@@ -608,11 +589,9 @@ xcreate()
 	# first if it already exists.  It's primary purpose is to help
 	# testing of create verb implementations.
 	#
-	# Typical usage:
+	# usage: pkgbuild xcreate
 	#
-	#    ./ups/pkgbuild xcreate
-	#
-	# and the result will be in _create
+	# The result will be in ./_create
 	#
 
 	# create an empty _create subdir
@@ -628,17 +607,12 @@ xcreate()
 
 xfetch()
 {
-	#
 	# Runs fetch() on the package whose contents is in ./_create. 
 	# Stores the result into ./_fetch, emptying it first if it already
 	# exists.  The primary purpose of this function is to help with
 	# testing of fetch verb implementations.
 	#
-	# Typical usage:
-	#
-	#    ./ups/pkgbuild xfetch
-	#
-	# and the result will be in _fetch
+	# usage: pkgbuild xfetch
 	#
 
 	[[ -d _create ]] || die "no _create directory; run '$0 xcreate' first."
@@ -646,8 +620,7 @@ xfetch()
 	rm -rf _fetch
 	cp -a _create _fetch
 
-	_PKGBUILD=$(test -f ./_fetch/ups/pkgbuild && echo "./ups/pkgbuild" || echo "$EUPS_DIR/lib/eupspkg/pkgbuild.default")
-	(cd _fetch && $_PKGBUILD -v $VERBOSE fetch)
+	(cd _fetch && pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" fetch)
 
 	msg "the result is in ./_fetch"
 }
@@ -661,6 +634,22 @@ xclean()
 	rm -rf _fetch _create
 }
 
+xdeclare()
+{
+	# Declare the package to EUPS
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+
+	# Sanity checks
+	if [[ ! -d "$PREFIX/ups" ]]; then
+		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
+	fi
+
+	eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
+	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
+}
+
 xmake()
 {
 	#
@@ -671,10 +660,10 @@ xmake()
 
 	setup -r .
 
-	pkgbuild -a -d -v $VERBOSE prep
-	pkgbuild -a -d -v $VERBOSE config
-	pkgbuild -a -d -v $VERBOSE build
-	pkgbuild -a -d -v $VERBOSE install
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" prep
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
 
 	unsetup -r .
 }
@@ -689,12 +678,12 @@ xall()
 
 	setup -r .
 
-	pkgbuild -a -d -v $VERBOSE prep
-	pkgbuild -a -d -v $VERBOSE config
-	pkgbuild -a -d -v $VERBOSE build
-	pkgbuild -a -d -v $VERBOSE install
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" prep
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
 
-	pkgbuild -a -d -v $VERBOSE eups_declare
+	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" xdeclare
 
 	unsetup -r .
 }
