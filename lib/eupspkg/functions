@@ -487,7 +487,7 @@ default_build()
 	# Attempt to autodetect the build system
 	#
 	if [[ -f SConstruct ]]; then
-		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION"
+		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION" cc="$CC"
 	elif [[ -f configure ]]; then
 		make -j$NJOBS prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
@@ -518,7 +518,7 @@ default_install()
 	# Attempt to autodetect the build system
 	#
 	if [[ -f SConstruct ]]; then
-		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION" install
+		scons -j$NJOBS opt=3 prefix="$PREFIX" version="$VERSION" cc="$CC" install
 	elif [[ -f configure ]]; then
 		make -j$NJOBS $MAKE_INSTALL_TARGETS
 		install_ups
@@ -791,3 +791,5 @@ PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory 
 CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
 PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--home $PREFIX"}		# Options passed to setup.py install. Note that --home is NOT passed separately!
 
+CC=${CC:-cc}			# Autoconf prefers to look for gcc first, and the proper thing is to default to cc. This helps on Darwin.
+CXX=${CXX:-c++}			# Autoconf prefers to look for gcc first, and the proper thing is to default to c++. This helps on Darwin.
