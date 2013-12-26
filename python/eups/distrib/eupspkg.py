@@ -549,6 +549,8 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         """
 
         pkg = location
+        if self.Eups.verbose >= 0:
+            print >> self.log, "[dl]",; self.log.flush()
         tfname = self.distServer.getFileForProduct(pkg, product, version,
                                                    self.Eups.flavor,
                                                    ftype="eupspkg", 
@@ -646,20 +648,23 @@ setup --type=build -k -r .
             # Run the build
             cmd = "(%s) >> %s 2>&1 " % (q(buildscript), q(logfile))
             if not self.nobuild:
+                if self.Eups.verbose >= 0:
+                    print >> self.log, "[build]",; self.log.flush()
                 eupsServer.system(cmd, self.Eups.noaction)
 
                 # Copy the build log into the product install directory. It's useful to keep around.
                 installDirUps = os.path.join(self.Eups.path[0], self.Eups.flavor, product, version, 'ups')
                 if os.path.isdir(installDirUps):
                     shutil.copy2(logfile, installDirUps)
-                    print >> self.log, "Build log file copied to %s/%s" % (installDirUps, os.path.basename(logfile))
+                    if self.verbose > 0:
+                        print >> self.log, "Build log file copied to %s/%s" % (installDirUps, os.path.basename(logfile))
                 else:
                     print >> self.log, "Build log file not copied as %s does not exist (this shouldn't happen)." % installDirUps
 
         except OSError, e:
             if self.verbose >= 0 and os.path.exists(logfile):
                 try: 
-                    print >> self.log, "BUILD ERROR!  From build log:"
+                    print >> self.log, "\n\n***** error: from %s:" % logfile
                     eupsServer.system("tail -20 %s 1>&2" % q(logfile))
                 except:
                     pass

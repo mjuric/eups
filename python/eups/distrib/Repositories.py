@@ -63,6 +63,8 @@ class Repositories(object):
         if self.verbose is None:
             self.verbose = self.eups.verbose
         self.log = log
+        if self.log is None:
+            self.log = sys.stdout
 
         if not distribClasses:
             distribClasses = {}
@@ -469,7 +471,8 @@ class Repositories(object):
                 if shouldInstall:
                     if self.verbose >= 0:
                         print >> self.log, \
-                              "Installing %s %s for %s..." % (prod.product, prod.version, prod.flavor)
+                              "Installing %s %s for %s: " % (prod.product, prod.version, prod.flavor),
+                        self.log.flush()
 
                     pkg = self.findPackage(prod.product, prod.version, prod.flavor)
                     if not pkg:
@@ -561,9 +564,7 @@ class Repositories(object):
             raise e
 
         if self.verbose >= 0:
-            print >> self.log, \
-                "Package %s %s installed successfully" % \
-                (prod.product, prod.version)
+            print >> self.log, "done."
 
         # declare the newly installed package, if necessary
         if not instflavor:
