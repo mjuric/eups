@@ -152,7 +152,8 @@ git_version()
 
 	# Check if this ref is already a tag; if yes, we're done.
 	if git show-ref -q --verify refs/tags/"$REF"; then
-		VERSION=$(_eups_compat_version "$REF")
+		_eups_compat_version "$REF"
+		echo
 		return
 	fi
 
