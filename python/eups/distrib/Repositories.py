@@ -426,13 +426,13 @@ class Repositories(object):
 
             shouldInstall = True
             if thisinstalled:
-                msg = "  [ %2d%s ]  %s %s already installed" % (at+1, nprods, prod.product, prod.version)
+                msg = "  [ %2d%s ]  %s %s" % (at+1, nprods, prod.product, prod.version)
 
                 if self.eups.force:
-                    msg += "; forcing a reinstall"
+                    msg += " (forcing a reinstall)"
                 else:
                     shouldInstall = False
-                    msg += "; use --force to reinstall"
+                    msg += " (already installed)"
 
                 if self.verbose >= 0:
                     print >> self.log, msg
@@ -476,7 +476,10 @@ class Repositories(object):
 
                 if shouldInstall:
                     if self.verbose >= 0:
-                        msg = "  [ %2d%s ]  %s %s (%s) " % (at+1, nprods, prod.product, prod.version, prod.flavor)
+                        msg1 = prod.flavor
+                        if prod.flavor == "generic":
+                            msg1 = "from source";
+                        msg = "  [ %2d%s ]  %s %s (%s)" % (at+1, nprods, prod.product, prod.version, msg1)
                         print >> self.log, msg,
                         self.log.flush()
 
