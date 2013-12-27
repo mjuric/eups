@@ -549,7 +549,7 @@ EUPSPKG_URL = %(base)s/products/%(path)s
         """
 
         pkg = location
-        if self.Eups.verbose >= 0:
+        if self.Eups.verbose >= 1:
             print >> self.log, "[dl]",; self.log.flush()
         tfname = self.distServer.getFileForProduct(pkg, product, version,
                                                    self.Eups.flavor,
@@ -648,7 +648,7 @@ setup --type=build -k -r .
             # Run the build
             cmd = "(%s) >> %s 2>&1 " % (q(buildscript), q(logfile))
             if not self.nobuild:
-                if self.Eups.verbose >= 0:
+                if self.Eups.verbose >= 1:
                     print >> self.log, "[build]",; self.log.flush()
                 eupsServer.system(cmd, self.Eups.noaction)
 

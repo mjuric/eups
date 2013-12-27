@@ -387,11 +387,17 @@ class Repositories(object):
             prod = manifest.getDependency(product, version, flavor)
             if prod and self.repos[pkgroot].getDistribFor(prod.distId, opts, flavor, tag).PRUNE:
                 searchDep = False       # no, we shouldn't process them
+
+        if searchDep:
+            nprods = ""                 # cannot predict the total number of products to install
+        else:
+            nprods = "/%-2s" % len(products)
+
         #
         # Process dependencies
         #
         productRoot0 = productRoot      # initial value
-        for prod in products:
+        for at, prod in enumerate(products):
             pver = prodid(prod.product, prod.version, instflavor)
 
             # check for circular dependencies:
@@ -420,7 +426,7 @@ class Repositories(object):
 
             shouldInstall = True
             if thisinstalled:
-                msg = "Required product %s %s is already installed" % (prod.product, prod.version)
+                msg = "  [ %2d%s ]  %s %s already installed" % (at+1, nprods, prod.product, prod.version)
 
                 if self.eups.force:
                     msg += "; forcing a reinstall"
@@ -470,8 +476,8 @@ class Repositories(object):
 
                 if shouldInstall:
                     if self.verbose >= 0:
-                        print >> self.log, \
-                              "Installing %s %s for %s: " % (prod.product, prod.version, prod.flavor),
+                        msg = "  [ %2d%s ]  %s %s (%s) " % (at+1, nprods, prod.product, prod.version, prod.flavor)
+                        print >> self.log, msg,
                         self.log.flush()
 
                     pkg = self.findPackage(prod.product, prod.version, prod.flavor)
@@ -490,6 +496,9 @@ class Repositories(object):
                         prod = nprod
 
                     self._doInstall(pkgroot, prod, productRoot, instflavor, opts, noclean, setups, tag)
+
+                    if self.verbose >= 0:
+                        print >> self.log, " "*(70-len(msg)), "done."
 
                     if pver not in ances:
                         ances.append(pver)
@@ -563,9 +572,6 @@ class Repositories(object):
         except RuntimeError, e:
             raise e
 
-        if self.verbose >= 0:
-            print >> self.log, "done."
-
         # declare the newly installed package, if necessary
         if not instflavor:
             instflavor = opts["flavor"]
@@ -629,7 +635,7 @@ class Repositories(object):
 
         for tag in tags:
            if tag not in dprod.tags:
-              if not self.eups.quiet:
+              if self.verbose > 0:
                  print >> self.log, "Assigning Server Tag %s to dependency %s %s" % \
                      (tag, dprod.name, dprod.version)
               try:
