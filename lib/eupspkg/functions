@@ -242,6 +242,24 @@ contains()
 	return 250
 }
 
+fix_autoconf_timestamps()
+{
+	# git does not preserve timestamps, which makes autoconf very
+	# unhappy and elusional about needing to regenerate configure and
+	# .in files. This function hacks its way around it.
+	#
+	# based on http://www.gnu.org/software/automake/manual/html_node/CVS.html
+
+	find . -name aclocal.m4 -exec touch {} \;
+	sleep 1
+
+	find . -name configure -exec touch {} \;
+	find . -name config.h.in -exec touch {} \;
+	find . -name Makefile.in -exec touch {} \;
+
+	find . -name "*.info" -exec touch {} \;
+}
+
 ##################### ---- DEFAULT VERB IMPL ---- #####################
 
 default_create()
@@ -447,6 +465,7 @@ default_config()
 	#   run custom configuration scripts
 
 	if [[ -f configure ]]; then
+		fix_autoconf_timestamps
 		./configure $CONFIGURE_OPTIONS
 	fi
 }
@@ -470,7 +489,7 @@ default_build()
 	if [[ -f SConstruct ]]; then
 		scons -j$NJOBS prefix="$PREFIX" version="$VERSION" cc="$CC"
 	elif [[ -f configure ]]; then
-		make -j$NJOBS prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
+		make -j$NJOBS $MAKE_BUILD_TARGETS
 	elif [[ -f Makefile || -f makefile || -f GNUmakefile ]]; then
 		make -j$NJOBS prefix="$PREFIX" version="$VERSION" $MAKE_BUILD_TARGETS
 	elif [[ -f setup.py ]]; then
