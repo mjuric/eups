@@ -23,13 +23,17 @@ set -e
 #   >=  2: Show debugging messages (debug)
 #   >=  3: Activate Bash tracing (set -x)
 
+# We'll use 3 as a "stdlog" descriptor, pointing to stderr if it hasn't
+# already been opened by a parent process.
+( exec >&3 ) 2>/dev/null || exec 3>&2
+
 # The funny '|| true' construct is there to ensure this works with 'set -e'
-die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild (fatal): $@" >&2 || true; exit -1; }
-error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild (error): $@" >&2 || true; }
-warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild (warning): $@" >&2 || true; }
-msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild: $@" >&2 || true; }
-info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild (info): $@" >&2 || true; }
-debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild (debug): $@" >&2 || true; }
+die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (fatal): $@" >&3 || true; exit -1; }
+error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (error): $@" >&3 || true; }
+warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (warning): $@" >&3 || true; }
+msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}}: $@" >&3 || true; }
+info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (info): $@" >&3 || true; }
+debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (debug): $@" >&3 || true; }
 
 die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
 
@@ -126,7 +130,7 @@ autoproduct()
 	fi
 
 	PRODUCT="$(basename "$REMOTE" .git)"
-	msg "guessed PRODUCT='$PRODUCT'"
+	info "guessed PRODUCT='$PRODUCT'"
 }
 
 autoversion()
@@ -135,7 +139,7 @@ autoversion()
 	# a git repository.
 
 	VERSION="$(pkgautoversion $1)"
-	msg "guessed VERSION='$VERSION'"
+	info "guessed VERSION='$VERSION'"
 }
 
 version_to_gitrev()
@@ -250,6 +254,13 @@ fix_autoconf_timestamps()
 	#
 	# based on http://www.gnu.org/software/automake/manual/html_node/CVS.html
 
+	if [[ -f "$UPSTREAM_DIR/prepared" ]]; then
+		# If we're running from a TaP package, assume
+		# timestamps are OK.
+		info "running from TaP package; not touching autoconf timestamps."
+		return
+	fi
+
 	find . -name aclocal.m4 -exec touch {} \;
 	sleep 1
 
@@ -337,7 +348,7 @@ default_create()
 			fi
 			mkdir -p ups
 			;;
-		"local")
+		"package")
 			# Extract the full source using git-archive, falling back to git-clone in case of failure.
 			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" 2>/dev/null | (tar xzf - 2>/dev/null || true)
 			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
@@ -353,7 +364,7 @@ default_create()
 			fi
 			;;
 		*)
-			echo "pkgbuild error: unknown source download mechanism SOURCE='$SOURCE' (known mechanisms: git, git-archive, local)."; exit -1;
+			echo "pkgbuild error: unknown source download mechanism SOURCE='$SOURCE' (known mechanisms: git, git-archive, package)."; exit -1;
 	esac
 
 	# if $REPOSITORY is a local directory, see if there's a remote named
@@ -374,7 +385,7 @@ default_create()
 
 	PKGINFO="ups/pkginfo"
 
-	msg "package contents created for '$PRODUCT-$VERSION', with sources in '$SOURCE'."
+	msg "package contents created for '$PRODUCT-$VERSION', sources will be fetched via '$SOURCE'."
 }
 
 default_fetch()
@@ -426,7 +437,7 @@ default_fetch()
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi
 			;;
-		"local")
+		"package")
 			;;
 		*)
 			die "unknown source '$SOURCE'. Malformed archive?";
@@ -459,11 +470,16 @@ default_prep()
 	# there must be a directory named 'upstream'
 
 	if [[ -d "$UPSTREAM_DIR" ]]; then
+	
+		if [[ -f "$UPSTREAM_DIR/prepared" ]]; then
+			msg "package already prepared (found '$UPSTREAM_DIR/prepared' flag file)."
+			return
+		fi
 
 		# verify that there are no files (other than .* or _*) in $pkgdir
 		# packagers: it's possible override this ckeck with TAP_PACKAGE=1
 		if [[ "$TAP_PACKAGE" != 1 && ! -z $(find . -maxdepth 1 -mindepth 1 ! -name ".*" ! -name "_*" -a -type f) ]]; then
-			die "files found in root directory; assuming this is not a TaP package"
+			die "files found in root directory; guessing this is not a TaP package."
 		fi
 
 		# untar the contents of upstream
@@ -486,6 +502,8 @@ default_prep()
 				patch -s -p1 < "$_p"
 			done
 		fi
+		
+		touch "$UPSTREAM_DIR/prepared"
 	fi
 }
 
@@ -630,15 +648,57 @@ EOF
 #
 # Define default verb implementations
 #
-create()  { default_create "$@"; }
-fetch()   { default_fetch "$@"; }
-prep()    { default_prep "$@"; }
-config()  { default_config "$@"; }
-build()   { default_build "$@"; }
-install() { default_install "$@"; }
-usage()   { default_usage "$@"; }
+create()  { _FUNCNAME=create  default_create "$@"; }
+fetch()   { _FUNCNAME=fetch   default_fetch "$@"; }
+prep()    { _FUNCNAME=prep    default_prep "$@"; }
+config()  { _FUNCNAME=config  default_config "$@"; }
+build()   { _FUNCNAME=build   default_build "$@"; }
+install() { _FUNCNAME=install default_install "$@"; }
+usage()   { _FUNCNAME=usage   default_usage "$@"; }
 
 ##################### ---- DEBUGGING UTILITIES ---- #####################
+
+_autover()
+{
+	# Auto-detect PRODUCT, VERSION and FLAVOR if they have not been set yet.
+	# To be only used by the x* verbs
+
+	[ -z "$PRODUCT" ] && autoproduct
+	[ -z "$VERSION" ] && autoversion $DIRTY_FLAG
+	FLAVOR=${FLAVOR:-generic}
+}
+
+_eupspkg_dispatch()
+{
+	# re-execute the command in ./_eupspkg, if it exists
+
+	# Note: Bash turns off the set -e checks within functions that run
+	# as parts of conditionals (unless they're last; see Bash docs). 
+	# That's why there are explicit checks here.
+
+	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
+
+	# lie to logging functions
+	local _FUNCNAME=${FUNCNAME[1]}
+
+	if [[ -d _eupspkg ]]; then
+		msg "running in ./_eupspkg"
+
+		(
+			cd _eupspkg
+
+			setup -r .
+
+			pkgbuild VERBOSE=$VERBOSE "$@"
+		) || exit -1
+		
+		# dispatched, return False
+		return 250
+	fi
+
+	# didn't dispatch, return True
+	return 0
+}
 
 xcreate()
 {
@@ -646,50 +706,69 @@ xcreate()
 	# first if it already exists.  It's primary purpose is to help
 	# testing of create verb implementations.
 	#
-	# usage: pkgbuild xcreate
+	# usage: pkgbuild xcreate [SOURCE=package]
 	#
-	# The result will be in ./_create
+	# The result will be in ./_eupspkg
 	#
 
-	# create an empty _create subdir
-	rm -rf _create
-	mkdir _create
+	# create an empty _eupspkg subdir
+	rm -rf _eupspkg
+	mkdir _eupspkg
+
+	[[ ! -z "$1" ]] && SOURCE="$1"
 
 	# run create() from the empty directory
-	cd _create
-	create "$@"
+	cd _eupspkg
+	create
 
-	msg "the result is in ./_create"
+	msg "the result is in ./_eupspkg"
 }
 
 xfetch()
 {
-	# Runs fetch() on the package whose contents is in ./_create. 
-	# Stores the result into ./_fetch, emptying it first if it already
-	# exists.  The primary purpose of this function is to help with
+	# Runs fetch() on the package whose contents is in ./_eupspkg. 
+	# The primary purpose of this function is to help with
 	# testing of fetch verb implementations.
 	#
 	# usage: pkgbuild xfetch
 	#
 
-	[[ -d _create ]] || die "no _create directory; run '$0 xcreate' first."
+	[[ -d _eupspkg ]] || die "no _eupspkg directory; run '$0 xcreate' first."
 
-	rm -rf _fetch
-	cp -a _create _fetch
-
-	(cd _fetch && pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" fetch)
-
-	msg "the result is in ./_fetch"
+	(cd _eupspkg; pkgbuild VERBOSE=$VERBOSE fetch "$@")
 }
 
-xclean()
+xprep()
 {
+	# Runs `pkgbuild prep' on the package in _eupspkg subdirectory.
+	# If it doesn't exist, tries to create one by copying the relevant
+	# pieces of the repository ($UPSTREAM_DIR and $PATCHES_DIR).
 	#
-	# Clean the outputs of x* verbs
+	# usage: pkgbuild xprep
 	#
 
-	rm -rf _fetch _create _prep
+	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
+
+	if [[ ! -d _eupspkg ]]; then
+		[[ -d "$UPSTREAM_DIR" ]] || die "no '$UPSTREAM_DIR' directory; is this a TaP package?"
+
+		mkdir _eupspkg
+		cp -a "$UPSTREAM_DIR" _eupspkg
+		test -d "$PATCHES_DIR" && cp -a "$PATCHES_DIR" "$PREP"
+		test -d ups && cp -a ups "$PREP"
+
+		# xconfig, xcreate, xinstall all expect PRODUCT, VERSION and FLAVOR to be defined
+		append_pkginfo PRODUCT
+		append_pkginfo VERSION
+		append_pkginfo FLAVOR
+	fi
+
+	( cd _eupspkg && pkgbuild VERBOSE=$VERBOSE prep "$@" ) || exit -1
 }
+
+xconfig()  { _eupspkg_dispatch $FUNCNAME "$@" || return 0; config "$@";  }
+xbuild()   { _eupspkg_dispatch $FUNCNAME "$@" || return 0; build "$@";   }
+xinstall() { _eupspkg_dispatch $FUNCNAME "$@" || return 0; install "$@"; }
 
 xdeclare()
 {
@@ -697,6 +776,10 @@ xdeclare()
 	#
 	# usage: xdeclare [eups_tag=current]
 	#
+	# If eups_tag is '-', the package will just be declared with no tag
+	# set.
+
+	_eupspkg_dispatch $FUNCNAME "$@" || return 0
 
 	die_if_empty PRODUCT
 	die_if_empty VERSION
@@ -713,98 +796,81 @@ xdeclare()
 	else
 		eups declare "$PRODUCT" "$VERSION" -r "$PREFIX"
 	fi
-	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
+
+	msg "declared $PRODUCT-$VERSION in $PREFIX (tags: ${1:-current})"
 }
 
-xprep()
+xclean()
 {
-	# Quickly preps the package in _prep subdirectory, emptying it first
-	# if it already exists.  Use the contents of _fetch as package
-	# contents, if it exists.  It's primary purpose is to help testing
-	# of prep verb implementations.
 	#
-	# usage: pkgbuild xprep
-	#
-	# The result will be in ./_prep
+	# Clean the outputs of x* verbs
 	#
 
-	[[ -d "$UPSTREAM_DIR" ]] || die "no '$UPSTREAM_DIR' directory; is this a TaP package?"
-
-	rm -rf _prep
-	mkdir _prep
-	local PREP=$(cd _prep && pwd)
-
-	(
-		[[ -d _fetch ]] && cd _fetch
-
-		cp -a "$UPSTREAM_DIR" "$PREP"
-		test -d "$PATCHES_DIR" && cp -a "$PATCHES_DIR" "$PREP"
-		test -d ups && cp -a ups "$PREP"
-	)
-
-	# run prep() from the empty directory
-	( cd _prep; prep "$@" )
-
-	msg "the result is in ./_prep"
+	msg "removing _eupspkg"
+	rm -rf _eupspkg
 }
 
-_run_in_prep()
+_setup_logger()
+{
+	# set up logging where stdin & stderr go to the log file, but some messages
+	# still get echoed to the console.
+	#
+	# inspired by http://www.linuxjournal.com/content/bash-redirections-using-exec
+
+	if [[ $1 == '-' ]]; then
+		return
+	fi
+
+	local npipe="/tmp/$$.tmp"
+	trap "rm -f $npipe" EXIT
+	mknod $npipe p
+	tee <$npipe "$1" | grep '^pkgbuild' &
+	exec 1>$npipe 2>&1 3>&1
+	msg "logging full output to '$1', echoing pkgbuild messages to console."
+}
+
+# internal mappings from xx verb options to true verbs
+_xg() { ( pkgbuild VERBOSE=$VERBOSE xcreate  ) }
+_xf() { ( pkgbuild VERBOSE=$VERBOSE xfetch   ) }
+_xp() { ( pkgbuild VERBOSE=$VERBOSE xprep    ) }
+_xc() { ( pkgbuild VERBOSE=$VERBOSE xconfig  ) }
+_xb() { ( pkgbuild VERBOSE=$VERBOSE xbuild   ) }
+_xi() { ( pkgbuild VERBOSE=$VERBOSE xinstall ) }
+_xd() { ( pkgbuild VERBOSE=$VERBOSE xdeclare ) }
+_xz() { ( pkgbuild VERBOSE=$VERBOSE xclean   ) }
+_xa() { _xg; _xf; _xp; _xc; _xb; _xi; _xd; _xz; }
+
+xx()
 {
 	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
 
-	(
-		[[ -d _prep ]] && cd _prep
-		setup -r .
-		"$@"
-	)
-}
+	local OPTSTR="gfpcbidzl:a"
 
-xconfig()  { _run_in_prep config "$@";  }
-xbuild()   { _run_in_prep build "$@";   }
-xinstall() { _run_in_prep install "$@"; }
+	# Find if logging was requested
+	local OPTIND=
+	while getopts $OPTSTR opt; do
+		if [[ $opt == 'l' ]]; then
+			_LOGFILE="$OPTARG"
+		fi
+	done
+	_setup_logger "${_LOGFILE:-ups/build.log}"
 
-xmake()
-{
-	#
-	# Run the config+build+install sequence for a package
-	#
-	# Run it in _prep, if it exists
-	#
+	# Parse/execute commands
+	local OPTIND=
+	while getopts $OPTSTR opt; do
+		[[ $opt != '?' ]] || die "option error"
+		if [[ $opt == 'l' ]]; then
+			continue
+		fi
 
-	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
+		_O=1
+		eval "_x$opt $OPTARG"
+	done
 
-	[[ -d _prep ]] && cd _prep
-
-	setup -r .
-
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
-
-	unsetup -r .
-}
-
-xall()
-{
-	#
-	# Run the full config+build+install+declare sequence for a package
-	#
-	# Run it in _prep, if it exists
-	#
-
-	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
-
-	[[ -d _prep ]] && cd _prep
-
-	setup -r .
-
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
-
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" xdeclare
-
-	unsetup -r .
+	# Default invocation, if no options are given
+	if [[ $_O != 1 ]]; then
+		xx -gfpcb -l -
+	fi
 }
 
 ##################### ---- INITIALIZATION ---- #####################
@@ -866,22 +932,16 @@ done
 [[ $# -ge 1 ]] || { error "insufficient number of arguments."; usage; exit -1; }
 
 #
-# Set up the key variables, but refuse to do it for EupsPkg API verbs where
-# we expect them to be set explicitly.  Also skip auto* for some x* verbs
-# where we know it's not needed.
+# Check that PRODUCT, VERSION, and FLAVOR have been set, unless an x* verb
+# is being invoked (in which case the verb itself will handle deducing the
+# version, if apropriate).
 #
-EUPSPKPG_VERBS="create fetch prep config build install"
-NOVERCHECK_VERBS="xfetch xclean"
-if ! contains "$1" $EUPSPKG_VERBS $NOVERCHECK_VERBS; then
-	[ -z "$PRODUCT" ] && autoproduct
-	[ -z "$VERSION" ] && autoversion $DIRTY_FLAG
-	FLAVOR=${FLAVOR:-generic}
+if [[ "$1" == x* && ! -d _eupspkg ]]; then
+	_autover
 fi
 
-if [[ -z "$PRODUCT" || -z "$VERSION" ]]; then
-	if ! contains "$1" $NOVERCHECK_VERBS; then
-		die "PRODUCT or VERSION were not defined. refusing to proceed."
-	fi
+if [[ "$1" != x* && (-z "$PRODUCT" || -z "$VERSION" || -z "$FLAVOR") ]]; then
+	die "PRODUCT or VERSION were not defined. refusing to proceed."
 fi
 
 ##################### ---- Defaults ---- #####################
@@ -891,7 +951,7 @@ NJOBS=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpu
 UPSTREAM_DIR=${UPSTREAM_DIR:-upstream}			# For "tarball-and-patch" packages (see default_prep()). Default location of source tarballs.
 PATCHES_DIR=${PATCHES_DIR:-patches}			# For "tarball-and-patch" packages (see default_prep()). Default location of patches.
 
-SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
+SOURCE=${SOURCE:-package}				# [package|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
 
 MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
