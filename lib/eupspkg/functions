@@ -448,7 +448,45 @@ default_prep()
 	#   apply applicable patches from $sourcedir/patches, depending
         #   on platform we're being compiled on.
 
-	:
+	# See if this is a "tarball-and-patch" (TaP) package:
+	#
+	# These have a directory named upstream/ with tarballs to untar
+	# into pkgroot, and possibly a directory named patches/ with patches
+	# to apply once all tarballs have been expanded.
+	#
+	# To be recognized as at TaP package, there must be no files (other
+	# than those starting with a dot) in the package root directory, and
+	# there must be a directory named 'upstream'
+
+	if [[ -d "$UPSTREAM_DIR" ]]; then
+
+		# verify that there are no files (other than .* or _*) in $pkgdir
+		# packagers: it's possible override this ckeck with TAP_PACKAGE=1
+		if [[ "$TAP_PACKAGE" != 1 && ! -z $(find . -maxdepth 1 -mindepth 1 ! -name ".*" ! -name "_*" -a -type f) ]]; then
+			die "files found in root directory; assuming this is not a TaP package"
+		fi
+
+		# untar the contents of upstream
+		for _tb in "$UPSTREAM_DIR"/*; do
+			msg "unpacking $_tb ..."
+			case $_tb in
+				*.tar.gz|*.tgz)  tar xzf "$_tb" --strip-components 1 ;;
+				*.tar.bz2|*.tbz) tar xjf "$_tb" --strip-components 1 ;;
+				*) die "unrecognized archive format for '$_tb'." ;;
+			esac
+		done
+
+		# apply patches from patches/ (if any) they must match
+		# *.patch.  subdirectories are _NOT_ searched -- it is
+		# safe for overrides to place patches they plan to apply
+		# into subdirs.
+		if [[ -d "$PATCHES_DIR" ]]; then
+			for _p in $(find "$PATCHES_DIR" -maxdepth 1 -mindepth 1 -name "*.patch"); do
+				msg "applying $_p ..."
+				patch -s -p1 < "$_p"
+			done
+		fi
+	fi
 }
 
 default_config()
@@ -650,7 +688,7 @@ xclean()
 	# Clean the outputs of x* verbs
 	#
 
-	rm -rf _fetch _create
+	rm -rf _fetch _create _prep
 }
 
 xdeclare()
@@ -678,17 +716,67 @@ xdeclare()
 	msg declared "$PRODUCT-$VERSION" in "$PREFIX"
 }
 
+xprep()
+{
+	# Quickly preps the package in _prep subdirectory, emptying it first
+	# if it already exists.  Use the contents of _fetch as package
+	# contents, if it exists.  It's primary purpose is to help testing
+	# of prep verb implementations.
+	#
+	# usage: pkgbuild xprep
+	#
+	# The result will be in ./_prep
+	#
+
+	[[ -d "$UPSTREAM_DIR" ]] || die "no '$UPSTREAM_DIR' directory; is this a TaP package?"
+
+	rm -rf _prep
+	mkdir _prep
+	local PREP=$(cd _prep && pwd)
+
+	(
+		[[ -d _fetch ]] && cd _fetch
+
+		cp -a "$UPSTREAM_DIR" "$PREP"
+		test -d "$PATCHES_DIR" && cp -a "$PATCHES_DIR" "$PREP"
+		test -d ups && cp -a ups "$PREP"
+	)
+
+	# run prep() from the empty directory
+	( cd _prep; prep "$@" )
+
+	msg "the result is in ./_prep"
+}
+
+_run_in_prep()
+{
+	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
+
+	(
+		[[ -d _prep ]] && cd _prep
+		setup -r .
+		"$@"
+	)
+}
+
+xconfig()  { _run_in_prep config "$@";  }
+xbuild()   { _run_in_prep build "$@";   }
+xinstall() { _run_in_prep install "$@"; }
+
 xmake()
 {
 	#
-	# Run the full prep+config+build+install sequence for a package
+	# Run the config+build+install sequence for a package
+	#
+	# Run it in _prep, if it exists
 	#
 
 	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
 
+	[[ -d _prep ]] && cd _prep
+
 	setup -r .
 
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" prep
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
@@ -699,14 +787,17 @@ xmake()
 xall()
 {
 	#
-	# Run the full build + declare sequence for a package
+	# Run the full config+build+install+declare sequence for a package
+	#
+	# Run it in _prep, if it exists
 	#
 
 	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
 
+	[[ -d _prep ]] && cd _prep
+
 	setup -r .
 
-	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" prep
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" config
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" build
 	pkgbuild -v $VERBOSE PRODUCT="$PRODUCT" VERSION="$VERSION" FLAVOR="$FLAVOR" install
@@ -796,6 +887,9 @@ fi
 ##################### ---- Defaults ---- #####################
 
 NJOBS=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)   # number of cores on the machine (Darwin & Linux)
+
+UPSTREAM_DIR=${UPSTREAM_DIR:-upstream}			# For "tarball-and-patch" packages (see default_prep()). Default location of source tarballs.
+PATCHES_DIR=${PATCHES_DIR:-patches}			# For "tarball-and-patch" packages (see default_prep()). Default location of patches.
 
 SOURCE=${SOURCE:-local}					# [local|git|git-archive]. Usually passed in via command line (eups distrib create ... -S SOURCE=...)
 REPOSITORY=${REPOSITORY:-}				# URL to git repository
