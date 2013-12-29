@@ -37,6 +37,16 @@ debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (d
 
 die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
 
+dumpvar()
+{
+	local cmd="$1"
+	shift
+
+	for _VAR in "$@"; do
+		eval "$cmd \"$_VAR='\$$_VAR'\""
+	done
+}
+
 append_pkginfo()
 {
 	# Append VARNAME=VARVALUE line to pkginfo file
@@ -130,6 +140,7 @@ autoproduct()
 	fi
 
 	PRODUCT="$(basename "$REMOTE" .git)"
+
 	info "guessed PRODUCT='$PRODUCT'"
 }
 
@@ -139,6 +150,7 @@ autoversion()
 	# a git repository.
 
 	VERSION="$(pkgautoversion $1)"
+
 	info "guessed VERSION='$VERSION'"
 }
 
@@ -181,11 +193,11 @@ clean_old_install()
 	# that $PREFIX is sane.
 	#
 	if [[ -e "$PREFIX" ]]; then
-		P0=$(cd "$(eups path 0)/$(eups flavor)" && pwd)
+		P0="$PRODUCTS_ROOT"
 		P1=$(cd "$PREFIX" && pwd)
 
 		# Delete only if $PREFIX is a proper subdirectory of eups
-		# install root
+		# products root
 		if [[ "$P0" != "$P1" && "$P1" == "$P0"* ]]; then
 			msg "deleting existing install in '$P1'"
 			rm -rf "$P1"
@@ -271,6 +283,27 @@ fix_autoconf_timestamps()
 	find . -name "*.info" -exec touch {} \;
 }
 
+decl()
+{
+	# Declare the product to EUPS
+	#
+	# usage: decl [eups declare arguments]
+	#
+
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+	die_if_empty PREFIX
+
+	# Sanity checks
+	if [[ ! -d "$PREFIX/ups" ]]; then
+		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
+	fi
+
+	eups declare "$PRODUCT" "$VERSION" -r "$PREFIX" "$@"
+
+	msg "declared $PRODUCT $VERSION in $PREFIX (eups declare options: ${@:-none})"
+}
+
 ##################### ---- DEFAULT VERB IMPL ---- #####################
 
 default_create()
@@ -282,9 +315,9 @@ default_create()
 	# Env: Nothing guaranteed to be setup-ed
 	#
 
-	# safety: refuse to work in a directory containing anything other than 'ups'
-	# subdirectory. This will prevent chaos when careless users run pkgbuild create
-	# in their source directories.
+	# safety: refuse to work in a non-empty directory. This will prevent
+	# chaos when careless users run pkgbuild create in their source
+	# directories.
 	if [[ ! -z "$(ls -A)" ]]; then
 		die "safety first: refusing to run from a non-empty directory."
 	fi
@@ -618,12 +651,11 @@ default_usage()
 	cat <<-"EOF"
 		pkgbuild -- EupsPkg builder script
 
-		usage: pkgbuild [-dh] [-v level] [VAR1=..] [VAR2=..] verb
+		usage: pkgbuild [-h] [-v level] [VAR1=..] [VAR2=..] verb
 
 		  verb  : one of create, fetch, prep, config, build, install
 
 		  v : set verbosity level (-2 through +3, default 0)
-		  d : don't check for dirty working dir in version autodet.
 		  h : show usage instructions
 
 		If run with 'create', the script will create './ups/pkginfo'
@@ -656,223 +688,6 @@ build()   { _FUNCNAME=build   default_build "$@"; }
 install() { _FUNCNAME=install default_install "$@"; }
 usage()   { _FUNCNAME=usage   default_usage "$@"; }
 
-##################### ---- DEBUGGING UTILITIES ---- #####################
-
-_autover()
-{
-	# Auto-detect PRODUCT, VERSION and FLAVOR if they have not been set yet.
-	# To be only used by the x* verbs
-
-	[ -z "$PRODUCT" ] && autoproduct
-	[ -z "$VERSION" ] && autoversion $DIRTY_FLAG
-	FLAVOR=${FLAVOR:-generic}
-}
-
-_eupspkg_dispatch()
-{
-	# re-execute the command in ./_eupspkg, if it exists
-
-	# Note: Bash turns off the set -e checks within functions that run
-	# as parts of conditionals (unless they're last; see Bash docs). 
-	# That's why there are explicit checks here.
-
-	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
-
-	# lie to logging functions
-	local _FUNCNAME=${FUNCNAME[1]}
-
-	if [[ -d _eupspkg ]]; then
-		msg "running in ./_eupspkg"
-
-		(
-			cd _eupspkg
-
-			setup -r .
-
-			pkgbuild VERBOSE=$VERBOSE "$@"
-		) || exit -1
-		
-		# dispatched, return False
-		return 250
-	fi
-
-	# didn't dispatch, return True
-	return 0
-}
-
-xcreate()
-{
-	# Quickly creates the package in _create subdirectory, emptying it
-	# first if it already exists.  It's primary purpose is to help
-	# testing of create verb implementations.
-	#
-	# usage: pkgbuild xcreate [SOURCE=package]
-	#
-	# The result will be in ./_eupspkg
-	#
-
-	# create an empty _eupspkg subdir
-	rm -rf _eupspkg
-	mkdir _eupspkg
-
-	[[ ! -z "$1" ]] && SOURCE="$1"
-
-	# run create() from the empty directory
-	cd _eupspkg
-	create
-
-	msg "the result is in ./_eupspkg"
-}
-
-xfetch()
-{
-	# Runs fetch() on the package whose contents is in ./_eupspkg. 
-	# The primary purpose of this function is to help with
-	# testing of fetch verb implementations.
-	#
-	# usage: pkgbuild xfetch
-	#
-
-	[[ -d _eupspkg ]] || die "no _eupspkg directory; run '$0 xcreate' first."
-
-	(cd _eupspkg; pkgbuild VERBOSE=$VERBOSE fetch "$@")
-}
-
-xprep()
-{
-	# Runs `pkgbuild prep' on the package in _eupspkg subdirectory.
-	# If it doesn't exist, tries to create one by copying the relevant
-	# pieces of the repository ($UPSTREAM_DIR and $PATCHES_DIR).
-	#
-	# usage: pkgbuild xprep
-	#
-
-	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
-
-	if [[ ! -d _eupspkg ]]; then
-		[[ -d "$UPSTREAM_DIR" ]] || die "no '$UPSTREAM_DIR' directory; is this a TaP package?"
-
-		mkdir _eupspkg
-		cp -a "$UPSTREAM_DIR" _eupspkg
-		test -d "$PATCHES_DIR" && cp -a "$PATCHES_DIR" "$PREP"
-		test -d ups && cp -a ups "$PREP"
-
-		# xconfig, xcreate, xinstall all expect PRODUCT, VERSION and FLAVOR to be defined
-		append_pkginfo PRODUCT
-		append_pkginfo VERSION
-		append_pkginfo FLAVOR
-	fi
-
-	( cd _eupspkg && pkgbuild VERBOSE=$VERBOSE prep "$@" ) || exit -1
-}
-
-xconfig()  { _eupspkg_dispatch $FUNCNAME "$@" || return 0; config "$@";  }
-xbuild()   { _eupspkg_dispatch $FUNCNAME "$@" || return 0; build "$@";   }
-xinstall() { _eupspkg_dispatch $FUNCNAME "$@" || return 0; install "$@"; }
-
-xdeclare()
-{
-	# Declare the package to EUPS
-	#
-	# usage: xdeclare [eups_tag=current]
-	#
-	# If eups_tag is '-', the package will just be declared with no tag
-	# set.
-
-	_eupspkg_dispatch $FUNCNAME "$@" || return 0
-
-	die_if_empty PRODUCT
-	die_if_empty VERSION
-
-	# Sanity checks
-	if [[ ! -d "$PREFIX/ups" ]]; then
-		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
-	fi
-
-	if [[ -z "$1" ]]; then
-		eups declare -c "$PRODUCT" "$VERSION" -r "$PREFIX"
-	elif [[ "$1" != '-' ]]; then
-		eups declare -t "$1" "$PRODUCT" "$VERSION" -r "$PREFIX"
-	else
-		eups declare "$PRODUCT" "$VERSION" -r "$PREFIX"
-	fi
-
-	msg "declared $PRODUCT-$VERSION in $PREFIX (tags: ${1:-current})"
-}
-
-xclean()
-{
-	#
-	# Clean the outputs of x* verbs
-	#
-
-	msg "removing _eupspkg"
-	rm -rf _eupspkg
-}
-
-_setup_logger()
-{
-	# set up logging where stdin & stderr go to the log file, but some messages
-	# still get echoed to the console.
-	#
-	# inspired by http://www.linuxjournal.com/content/bash-redirections-using-exec
-
-	if [[ $1 == '-' ]]; then
-		return
-	fi
-
-	local npipe="/tmp/$$.tmp"
-	trap "rm -f $npipe" EXIT
-	mknod $npipe p
-	tee <$npipe "$1" | grep '^pkgbuild' &
-	exec 1>$npipe 2>&1 3>&1
-	msg "logging full output to '$1', echoing pkgbuild messages to console."
-}
-
-# internal mappings from xx verb options to true verbs
-_xg() { ( pkgbuild VERBOSE=$VERBOSE xcreate  ) }
-_xf() { ( pkgbuild VERBOSE=$VERBOSE xfetch   ) }
-_xp() { ( pkgbuild VERBOSE=$VERBOSE xprep    ) }
-_xc() { ( pkgbuild VERBOSE=$VERBOSE xconfig  ) }
-_xb() { ( pkgbuild VERBOSE=$VERBOSE xbuild   ) }
-_xi() { ( pkgbuild VERBOSE=$VERBOSE xinstall ) }
-_xd() { ( pkgbuild VERBOSE=$VERBOSE xdeclare ) }
-_xz() { ( pkgbuild VERBOSE=$VERBOSE xclean   ) }
-_xa() { _xg; _xf; _xp; _xc; _xb; _xi; _xd; _xz; }
-
-xx()
-{
-	[[ -d ups ]] || die "no ./ups directory. are you in an EUPS package root?"
-
-	local OPTSTR="gfpcbidzl:a"
-
-	# Find if logging was requested
-	local OPTIND=
-	while getopts $OPTSTR opt; do
-		if [[ $opt == 'l' ]]; then
-			_LOGFILE="$OPTARG"
-		fi
-	done
-	_setup_logger "${_LOGFILE:-ups/build.log}"
-
-	# Parse/execute commands
-	local OPTIND=
-	while getopts $OPTSTR opt; do
-		[[ $opt != '?' ]] || die "option error"
-		if [[ $opt == 'l' ]]; then
-			continue
-		fi
-
-		_O=1
-		eval "_x$opt $OPTARG"
-	done
-
-	# Default invocation, if no options are given
-	if [[ $_O != 1 ]]; then
-		xx -gfpcb -l -
-	fi
-}
-
 ##################### ---- INITIALIZATION ---- #####################
 
 #
@@ -880,10 +695,14 @@ xx()
 #
 VERBOSE=${VERBOSE:-0}
 DIRTY_FLAG=${DIRTY_FLAG:-"--dirty"}
-while getopts ":v:hadf" opt; do
+DEVMODE=${DEVMODE:-0}
+INSTALL_TO_EUPS_ROOT=${INSTALL_TO_EUPS_ROOT:-0}
+while getopts ":v:hedr" opt; do
 	case $opt in
 		v) VERBOSE="$OPTARG" ;;
 		d) DIRTY_FLAG="" ;;
+		e) DEVMODE=1 ;;
+		r) INSTALL_TO_EUPS_ROOT=1 ;;
 		h) usage; exit; ;;
 		\?) die "Invalid option: -$OPTARG" ;;
 		:) die "Option -$OPTARG requires an argument." ;;
@@ -892,7 +711,8 @@ done
 shift $((OPTIND-1))
 
 # Peek if PREFIX or VERBOSE were given on the command line (to correctly
-# find pkginfo). Inelegant, but effective...
+# find pkginfo).  Also remember the last value as $CMD.  Inelegant, but
+# effective...
 for _V in "$@"; do
 	[[ ! $_V =~ [A-Za-z0-9_]+=.* ]] && break	# stop on first non-assignment
 	[[ ! $_V =~ (PREFIX|VERBOSE)=.* ]] && continue	# skip all but PREFIX and VERBOSE
@@ -901,6 +721,7 @@ for _V in "$@"; do
 	_VAL="${_V#*=}"
 	eval "$_KEY='$_VAL'"
 done
+CMD="$_V"
 
 #
 # Debug level 3 activates tracing
@@ -908,13 +729,37 @@ done
 [[ $VERBOSE -ge 3 ]] && set -x
 
 #
+# Special handling if we're in dev mode (pre-pkginfo or command line)
+#
+if [[ $DEVMODE == 1 ]]; then
+	# Remember the location of the source, in case we chdir
+	_PSOURCE="$PWD"
+
+	# chdir to _eupspkg/source if it exists, unless the user is
+	# invoking 'create'.
+	if [[ -d _eupspkg/source && $CMD != "create" ]]; then
+		msg "switching to ./_eupspkg/source"
+		cd _eupspkg/source
+	fi
+fi
+
+#
 # Source the pkginfo file
 #
 # EupsPkg API: PREFIX will be set when 'create' is called, pointing to the installed package
-# pkgbuild uses it to locate pkginfo (assumes . as the default)
-if [[ -f "${PREFIX:-.}/ups/pkginfo" ]]; then
-	debug "found pkginfo in ${PREFIX:-.}/ups/pkginfo."
-	. "${PREFIX:-.}/ups/pkginfo"
+# pkgbuild uses it to locate pkginfo (assumes . as the default). For other verbs, we'll look for
+# pkginfo in ./ups/pkginfo.
+#
+if [[ $CMD == create ]]; then
+	_PKGINFO="${PREFIX:-.}/ups/pkginfo"
+else
+	_PKGINFO="./ups/pkginfo"
+fi
+
+debug "looking for pkginfo in $_PKGINFO."
+if [[ -f "$_PKGINFO" ]]; then
+	debug "found pkginfo in $_PKGINFO."
+	. "$_PKGINFO"
 fi
 
 #
@@ -932,16 +777,46 @@ done
 [[ $# -ge 1 ]] || { error "insufficient number of arguments."; usage; exit -1; }
 
 #
-# Check that PRODUCT, VERSION, and FLAVOR have been set, unless an x* verb
-# is being invoked (in which case the verb itself will handle deducing the
-# version, if apropriate).
+# Special handling if we're in dev mode (post-pkginfo)
+# At this point we have all envvar+pkginfo+cmdline overrides loaded
 #
-if [[ "$1" == x* && ! -d _eupspkg ]]; then
-	_autover
+if [[ $DEVMODE == 1 ]]; then
+	# Automatically set the version if not running in _eupspkg/source (if
+	# running there, create should've populated pkginfo with all that's
+	# needed)
+
+	if [[ $PWD != */_eupspkg/source ]]; then
+		# Make sure PRODUCT, VERSION, and FLAVOR are set
+		[ -z "$PRODUCT" ] && autoproduct
+		[ -z "$VERSION" ] && autoversion $DIRTY_FLAG
+		FLAVOR=${FLAVOR:-generic}
+	fi
+
+
+	if [[ $1 == "create" ]]; then
+		# if invoking create, clean and/or auto-create and enter the _eupspkg/source directory
+		# also set the prefix to product source directory (as would EUPS when invoking create)
+
+		[[ $PWD == */_eupspkg/source ]] && die "you probably don't want to rerun 'create' in _eupspkg/source directory. chdir one level up and try again."
+
+		PREFIX=${PREFIX:-"$PWD"}
+
+		rm -rf _eupspkg/source
+		mkdir -p _eupspkg/source
+		cd _eupspkg/source
+	else
+		# where should we install the product?
+		if [[ $INSTALL_TO_EUPS_ROOT != 1 ]]; then
+			PRODUCTS_ROOT=${PRODUCTS_ROOT:-"$_PSOURCE/_eupspkg/binary"}
+		fi
+	fi
 fi
 
-if [[ "$1" != x* && (-z "$PRODUCT" || -z "$VERSION" || -z "$FLAVOR") ]]; then
-	die "PRODUCT or VERSION were not defined. refusing to proceed."
+#
+# Verify that PRODUCT, VERSION, and FLAVOR have been set.
+#
+if [[ -z "$PRODUCT" || -z "$VERSION" || -z "$FLAVOR" ]]; then
+	die "PRODUCT, VERSION, or FLAVOR were not defined. refusing to proceed."
 fi
 
 ##################### ---- Defaults ---- #####################
@@ -957,12 +832,24 @@ REPOSITORY=${REPOSITORY:-}				# URL to git repository
 MAKE_BUILD_TARGETS=${MAKE_BUILD_TARGETS:-}		# Targets for invocation of make in build phase
 MAKE_INSTALL_TARGETS=${MAKE_INSTALL_TARGETS:-"install"}	# Targets for invocation of make in test phase
 
-PREFIX=${PREFIX:-"$(eups path 0)/$(eups flavor)/$PRODUCT/$VERSION"}	# Directory to which the product will be installed
+PRODUCTS_ROOT=${PRODUCTS_ROOT:-"$(eups path 0)/$(eups flavor)"}		# Root directory of EUPS-managed stack.
+PREFIX=${PREFIX:-"$PRODUCTS_ROOT/$PRODUCT/$VERSION"}			# Directory to which the product will be installed
 
-CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}			# Options passed to ./configure. Note that --prefix is NOT passed separately!
-PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--home $PREFIX"}		# Options passed to setup.py install. Note that --home is NOT passed separately!
+CONFIGURE_OPTIONS=${CONFIGURE_OPTIONS:-"--prefix $PREFIX"}		# Options passed to ./configure. Note that --prefix is NOT passed separately!
+PYSETUP_INSTALL_OPTIONS=${PYSETUP_INSTALL_OPTIONS:-"--home $PREFIX"}	# Options passed to setup.py install. Note that --home is NOT passed separately!
 
-export CC=${CC:-cc}			# Autoconf prefers to look for gcc first, and the proper thing is to default to cc. This helps on Darwin.
-export CXX=${CXX:-c++}			# Autoconf prefers to look for gcc first, and the proper thing is to default to c++. This helps on Darwin.
+export CC=${CC:-cc}				# Autoconf prefers to look for gcc first, and the proper thing is to default to cc. This helps on Darwin.
+export CXX=${CXX:-c++}				# Autoconf prefers to look for gcc first, and the proper thing is to default to c++. This helps on Darwin.
 
 export SCONSFLAGS=${SCONSFLAGS:-"opt=3"}	# Default scons flags
+
+##################### ---- -------- ---- #####################
+
+#
+# Dump the state of all key variables (helpful when debugging)
+#
+dumpvar debug PWD
+dumpvar debug PRODUCT VERSION FLAVOR
+dumpvar debug NJOBS UPSTREAM_DIR PATCHES_DIR SOURCE REPOSITORY MAKE_BUILD_TARGETS MAKE_INSTALL_TARGETS
+dumpvar debug PRODUCTS_ROOT PREFIX CONFIGURE_OPTIONS PYSETUP_INSTALL_OPTIONS
+dumpvar debug CC CXX SCONSFLAGS
