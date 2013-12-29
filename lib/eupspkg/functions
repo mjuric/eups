@@ -651,29 +651,60 @@ default_usage()
 	cat <<-"EOF"
 		pkgbuild -- EupsPkg builder script
 
-		usage: pkgbuild [-h] [-v level] [VAR1=..] [VAR2=..] verb
+		usage: pkgbuild [-hedr] [-v level] [VAR1=..] [VAR2=..] verb
 
 		  verb  : one of create, fetch, prep, config, build, install
 
 		  v : set verbosity level (-2 through +3, default 0)
 		  h : show usage instructions
 
-		If run with 'create', the script will create './ups/pkginfo'
-		with package configuration, as well as prepare the package
+		  e : activate 'developer mode', product name/version is 
+		      autodetected
+		  d : in developer mode, don't test for dirty source tree 
+		      when autodetecting versions
+		  r : in developer mode, make install $PREFIX for the
+		      product point to EUPS binary directory
+
+		EUPSPKG STANDARD MODE:
+
+		If run with 'create', the script expects to be executed in
+		an empty directory and PRODUCT, VERSION, FLAVOR, and PREFIX
+		to be passed in as variables on the command line.  Using
+		those, it will create './ups/pkginfo' with package
+		configuration, as well as prepare the package contents
 		depending on the chosen SOURCE.  Any existing
 		$PREFIX/ups/pkginfo will be sourced to deduce REPOSITORY and
-		SHA1.
+		SHA1.  If REPOSITORY_PATH is passed or exists in the
+		environment, it will be preferred over REPOSITORY from pkginfo.
 
 		If run with any other verb, the script will look for
-		'./ups/pkginfo' to source the configuration.  If it does not
-		exist, the script will assume the configuration is passed
-		via the environment and attempt to guess PRODUCT and VERSION
-		using git.
+		'./ups/pkginfo' to source the configuration.  At least
+		PRODUCT, VERSION and FLAVOR must be present.
 
 		Variables can be passed on the command line, after the
 		options and before the verb.  These override any from the
 		environment or pkginfo.
 
+		DEVELOPER MODE:
+		
+		Developer mode is there to facilitate creation and testing
+		of EupsPkg packages.  When active, PRODUCT, VERSION and
+		FLAVOR will be autodetected from git.  Unless -r is given,
+		PREFIX will point to ./_eupspkg/binary/$PRODUCT/$VERSION. 
+		The verbs will behave as follows:
+		
+		  create   : will create ./_eupspkg/source and run create 
+		             there.
+		  fetch    : will run fetch in ./_eupspkg/source
+		  prep     : will run prep in ./_eupspkg/source
+		  config,  : if ./_eupspkg/source exists, will run the verb
+		  build,     there, otherwise will run it in current dir.
+		  install 
+
+		Additional verbs will be available:
+
+		  decl    : declare the package to EUPS. Any arguments to
+		            decl will be passed on to 'eups declare'
 EOF
 }
 
