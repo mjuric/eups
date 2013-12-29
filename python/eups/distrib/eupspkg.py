@@ -618,7 +618,7 @@ cd "$PKGDIR"
 # If ./ups/eupspkg is not present, symlink in the default
 if [[ ! -e ./ups/eupspkg ]]; then
 	mkdir -p ./ups
-	ln -s "$EUPS_DIR/lib/eupspkg/eupspkg.default" ups/eupspkg
+	ln -s "$EUPS_DIR/lib/eupspkg.default" ups/eupspkg
 fi
 
 # eups setup the dependencies
