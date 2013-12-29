@@ -343,7 +343,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
     NAME = "eupspkg"
     PRUNE = True
 
-    def __init__(self, Eups, distServ, flavor, tag="current", options=None,
+    def __init__(self, Eups, distServ, flavor=None, tag="current", options=None,
                  verbosity=0, log=sys.stderr):
         eupsDistrib.Distrib.__init__(self, Eups, distServ, flavor, tag, options,
                                      verbosity, log)
@@ -390,7 +390,10 @@ class Distrib(eupsDistrib.DefaultDistrib):
         if not os.path.exists(config):
             configcontents = """\
 # Configuration for a EupsPkg-based server
+DISTRIB_CLASS = eups.distrib.eupspkg.Distrib
 EUPSPKG_URL = %(base)s/products/%(path)s
+LIST_URL = %(base)s/tags/%(tag)s.list
+TAGLIST_DIR = tags
 """
             cf = open(config, 'a')
             try:
@@ -398,6 +401,20 @@ EUPSPKG_URL = %(base)s/products/%(path)s
             finally:
                 cf.close()
 
+	# Create the tags storage directory
+	tagsDir = os.path.join(serverDir, 'tags')
+	if not os.path.exists(tagsDir):
+		os.mkdir(tagsDir)
+
+
+    def getTaggedReleasePath(self, tag, flavor=None):
+        """get the file path relative to a server root that will be used 
+        store the product list that makes up a tagged release.
+        @param tag        the name of the tagged release of interest
+        @param flavor         the target flavor for this release.  An 
+                                  implementation may ignore this variable.  
+        """
+        return "tags/%s.list" % tag
 
     def getManifestPath(self, serverDir, product, version, flavor=None):
         """return the path where the manifest for a particular product will
