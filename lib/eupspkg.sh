@@ -2,10 +2,10 @@
 #
 # EupsPkg Distrib Mechanism Function Library
 #
-# Defines utility functions, default implementations of pkgbuild verbs, and
+# Defines utility functions, default implementations of eupspkg verbs, and
 # performs common initialization.
 #
-# Should be sourced early on in pkgbuild scripts.
+# Should be sourced early on in eupspkg scripts.
 #
 
 set -e
@@ -28,12 +28,12 @@ set -e
 ( exec >&3 ) 2>/dev/null || exec 3>&2
 
 # The funny '|| true' construct is there to ensure this works with 'set -e'
-die()   { [[ $VERBOSE -ge -3 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (fatal): $@" >&3 || true; exit -1; }
-error() { [[ $VERBOSE -ge -2 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (error): $@" >&3 || true; }
-warn()  { [[ $VERBOSE -ge -1 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (warning): $@" >&3 || true; }
-msg()   { [[ $VERBOSE -ge 0 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}}: $@" >&3 || true; }
-info()  { [[ $VERBOSE -ge 1 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (info): $@" >&3 || true; }
-debug() { [[ $VERBOSE -ge 2 ]] && echo "pkgbuild.${_FUNCNAME:-${FUNCNAME[1]}} (debug): $@" >&3 || true; }
+die()   { [[ $VERBOSE -ge -3 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}} (fatal): $@" >&3 || true; exit -1; }
+error() { [[ $VERBOSE -ge -2 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}} (error): $@" >&3 || true; }
+warn()  { [[ $VERBOSE -ge -1 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}} (warning): $@" >&3 || true; }
+msg()   { [[ $VERBOSE -ge 0 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}}: $@" >&3 || true; }
+info()  { [[ $VERBOSE -ge 1 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}} (info): $@" >&3 || true; }
+debug() { [[ $VERBOSE -ge 2 ]] && echo "eupspkg.${_FUNCNAME:-${FUNCNAME[1]}} (debug): $@" >&3 || true; }
 
 die_if_empty() { eval VAL_="\$$1"; if [ -z "$VAL_" ]; then die "$1 is not set. refusing to proceed."; fi; }
 
@@ -296,7 +296,7 @@ decl()
 
 	# Sanity checks
 	if [[ ! -d "$PREFIX/ups" ]]; then
-		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'pkgbuild install'?"
+		die "directory $PREFIX doesn't exist or is not a directory. did you forget to run 'eupspkg install'?"
 	fi
 
 	eups declare "$PRODUCT" "$VERSION" -r "$PREFIX" "$@"
@@ -316,7 +316,7 @@ default_create()
 	#
 
 	# safety: refuse to work in a non-empty directory. This will prevent
-	# chaos when careless users run pkgbuild create in their source
+	# chaos when careless users run eupspkg create in their source
 	# directories.
 	if [[ ! -z "$(ls -A)" ]]; then
 		die "safety first: refusing to run from a non-empty directory."
@@ -347,7 +347,7 @@ default_create()
 
 	case "$SOURCE" in
 		git)
-			# Use git clone to extract ups/pkgbuild. Store the SHA1 into $PKGINFO
+			# Use git clone to extract ups/eupspkg. Store the SHA1 into $PKGINFO
 			# Note: this is terribly inefficient, but git doesn't provide a
 			# mechanism to just fetch a single file given a ref.
 			git clone --shared -n -q "$REPOSITORY" tmp
@@ -359,15 +359,15 @@ default_create()
 			append_pkginfo SHA1
 
 			mkdir ups
-			if [[ -e tmp/ups/pkgbuild ]]; then
-				mv tmp/ups/pkgbuild ups
+			if [[ -e tmp/ups/eupspkg ]]; then
+				mv tmp/ups/eupspkg ups
 			fi
 
 			rm -rf tmp
 			;;
 		git-archive)
-			# Extract ups/pkgbuild using git-archive
-			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/pkgbuild 2>/dev/null | (tar xzf - 2>/dev/null || true)
+			# Extract ups/eupspkg using git-archive
+			git archive --format=tar.gz --remote="$REPOSITORY" "$VERSION" ups/eupspkg 2>/dev/null | (tar xzf - 2>/dev/null || true)
 			# note: the odd tar construct (and PIPESTATUS check) is to account for BSD/gnu tar differences:
 			#       BSD tar returns success on broken pipe, gnu tar returns an error.
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
@@ -397,7 +397,7 @@ default_create()
 			fi
 			;;
 		*)
-			echo "pkgbuild error: unknown source download mechanism SOURCE='$SOURCE' (known mechanisms: git, git-archive, package)."; exit -1;
+			echo "eupspkg error: unknown source download mechanism SOURCE='$SOURCE' (known mechanisms: git, git-archive, package)."; exit -1;
 	esac
 
 	# if $REPOSITORY is a local directory, see if there's a remote named
@@ -450,9 +450,9 @@ default_fetch()
 
 			# move everything but the contents of the ups directory (as it already exists)
 			find tmp -maxdepth 1 -mindepth 1 ! -name ups -exec mv {} . \;
-			# move the contents of the ups directory, excluding pkgbuild and pkginfo
-			find tmp/ups -maxdepth 1 -mindepth 1 ! \(  -name pkgbuild -o -name pkginfo \) -exec mv {} ups \;
-			rm -f tmp/ups/pkgbuild tmp/ups/pkginfo
+			# move the contents of the ups directory, excluding eupspkg and pkginfo
+			find tmp/ups -maxdepth 1 -mindepth 1 ! \(  -name eupspkg -o -name pkginfo \) -exec mv {} ups \;
+			rm -f tmp/ups/eupspkg tmp/ups/pkginfo
 			rmdir tmp/ups 2>/dev/null || true
 
 			# the tmp directory must be empty at this point
@@ -465,7 +465,7 @@ default_fetch()
 			#       BSD tar returns success on broken pipe, gnu tar returns an error.
 
 			info "fetching via git-archive from $REPOSITORY"
-			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | (tar xzf - --exclude ups/pkgbuild --exclude ups/pkginfo 2>/dev/null || true)
+			git archive --format=tar.gz  --remote="$REPOSITORY" "$VERSION" | (tar xzf - --exclude ups/eupspkg --exclude ups/pkginfo 2>/dev/null || true)
 			if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
 				die could not access "$REPOSITORY" via git-archive. has it been tagged with "$VERSION"?
 			fi
@@ -649,9 +649,9 @@ evil_setuptools_pth_fix()
 default_usage()
 {
 	cat <<-"EOF"
-		pkgbuild -- EupsPkg builder script
+		eupspkg -- EupsPkg builder script
 
-		usage: pkgbuild [-hedr] [-v level] [VAR1=..] [VAR2=..] verb
+		usage: eupspkg [-hedr] [-v level] [VAR1=..] [VAR2=..] verb
 
 		  verb  : one of create, fetch, prep, config, build, install
 
@@ -778,7 +778,7 @@ fi
 # Source the pkginfo file
 #
 # EupsPkg API: PREFIX will be set when 'create' is called, pointing to the installed package
-# pkgbuild uses it to locate pkginfo (assumes . as the default). For other verbs, we'll look for
+# eupspkg uses it to locate pkginfo (assumes . as the default). For other verbs, we'll look for
 # pkginfo in ./ups/pkginfo.
 #
 if [[ $CMD == create ]]; then

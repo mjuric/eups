@@ -1,9 +1,0 @@
-#!/bin/bash
-#
-# Default pkgbuild file. This will be run if no 'ups/pkgbuild' exists in the
-# package being created or installed.
-#
-
-. "$EUPS_DIR/lib/eupspkg/functions"
-
-"$@"
