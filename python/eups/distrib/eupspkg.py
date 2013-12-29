@@ -18,14 +18,14 @@ class Distrib(eupsDistrib.DefaultDistrib):
     EupsPkg packages are free-formed gzipped tarballs ending in .eupspkg. 
     When an EupsPkg package is being installed via 'eups distrib install',
     the tarball ie expanded into a temporary directory (hereafter called
-    $pkgdir) and a file ./ups/pkgbuild is searched for.  This file is
+    $pkgdir) and a file ./ups/eupspkg is searched for.  This file is
     expected to be executable, and define the following verbs:
 
-       pkgbuild fetch     -- fetch the source code for this package
-       pkgbuild prep      -- prepare the source code (e.g., apply patches)
-       pkgbuild config    -- configure the source code
-       pkgbuild build     -- build the source code
-       pkgbuild install   -- install the binary to its destination
+       eupspkg fetch     -- fetch the source code for this package
+       eupspkg prep      -- prepare the source code (e.g., apply patches)
+       eupspkg config    -- configure the source code
+       eupspkg build     -- build the source code
+       eupspkg install   -- install the binary to its destination
 
     These are invoked by EUPS, in sequence, from $pkgdir. For all verbs, the
     dependencies, as obtained from the manifest, will be setup-ed. 
@@ -33,26 +33,26 @@ class Distrib(eupsDistrib.DefaultDistrib):
     will be setup-ed (i.e., `setup --type=build -k -r .' will be executed in
     $pkgdir).  All invocations are run from an auto-generated Bash script
     named $pkgdir/../build.sh; in case of build problems, the end-user can
-    inspect and edit it (as well as ups/pkgbuild) as necessary.
+    inspect and edit it (as well as ups/eupspkg) as necessary.
 
-    The pkgbuild script should not need to manipulate the EUPS environment,
+    The eupspkg script should not need to manipulate the EUPS environment,
     nor declare the product to EUPS upon successful completion of
     installation.  Note that this is different from the custom for EUPS'
     .build distribution mechanism.
     
-    If the packager does not provide a pkgbuild script, a default one will
+    If the packager does not provide a eupspkg script, a default one will
     be used that provides implementations of all verbs for common build
     systems (see below).
 
 
     When a package is being created using 'eups distrib create', the create
-    verb will be invoked on the installed product's pkgbuild script:
+    verb will be invoked on the installed product's eupspkg script:
 
-       pkgbuild create    -- put together files needed for distribution
+       eupspkg create    -- put together files needed for distribution
 
     The script will be invoked from an empty temporary directory (hereafter,
     $pkgdir), and is expected to copy or otherwise generate all files
-    necessary for the package (including ./ups/pkgbuild, which is,
+    necessary for the package (including ./ups/eupspkg, which is,
     presumably, just a copy of itself).
     
     The information about the product being packaged will be passed via
@@ -62,12 +62,12 @@ class Distrib(eupsDistrib.DefaultDistrib):
        $VERSION   -- product version, as given to eups distrib create
        $FLAVOR    -- product flavor, as given to eups distrib create
 
-       $SOURCE    -- pkgbuild-specific mechanism to retrieve the 
+       $SOURCE    -- eupspkg-specific mechanism to retrieve the 
                      product source (passed via -S option, see below)
-       $VERBOSE   -- pkgbuild-specific verbosity level (passed via -S
+       $VERBOSE   -- eupspkg-specific verbosity level (passed via -S
                      option, see below)
     
-    Once 'pkgbuild create' returns, the $pkgbuild directory is tarballed and
+    Once 'eupspkg create' returns, the $eupspkg directory is tarballed and
     stored to serverDir with .eupspkg extension. Metadata (the manifest as
     well as the table file) is stored as well.
 
@@ -82,33 +82,33 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
 
     The above requirements on verbs present are all that's required of
-    pkgbuild scripts.  The creation and building of packages, as well as
+    eupspkg scripts.  The creation and building of packages, as well as
     interpretation of $SOURCE and $VERBOSE inputs is completely under the
-    pkgbuild script's control.  EUPS has no awareness of package contents,
-    beyond assuming 'ups/pkgbuild' is the ``entry point'' for creation and
+    eupspkg script's control.  EUPS has no awareness of package contents,
+    beyond assuming 'ups/eupspkg' is the ``entry point'' for creation and
     installs.
     
-    This allows for high degree of customization, as the pkgbuild script
+    This allows for high degree of customization, as the eupspkg script
     that the packager writes is free to internally organize the package in
     arbitrary ways, or implement different ways of getting to the source
     (e.g., include it in the package, or just keep a pointer to a location
     on the web, or a location in a version control system).  Also, note that
-    there's no requirement that pkgbuild scripts are "scripts" (eg, Bash),
+    there's no requirement that eupspkg scripts are "scripts" (eg, Bash),
     as long as they're executable on the end-users system (they could be
     Python programs).
     
     In practice, the range of build systems commonly in use is (fortunately)
     limited, most adhering to widely accepted conventions (eg.,
     "./configure"/"make"/"make install" idioms for autoconf, etc.). EupsPkg
-    provides a default (Bash) library of pkgbuild verb implementations, to
-    greatly simplify the writing of pkgbuild scripts.
+    provides a default (Bash) library of eupspkg verb implementations, to
+    greatly simplify the writing of eupspkg scripts.
 
     The default (Bash) verb implementation library can be found in:
     
        $EUPS_DIR/lib/eupspkg/functions
 
     and is guaranteed to be present on any system running EUPS with EupsPkg. 
-    A typical pkgbuild script using these will look as follows:
+    A typical eupspkg script using these will look as follows:
     
        ================================================================
        #!/bin/bash
@@ -124,7 +124,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
     in by EUPS via the environment (discussed above) to create or install
     the package (depending on which one is invoked).
     
-    The code above is the default implementation of pkgbuild that EUPS will
+    The code above is the default implementation of eupspkg that EUPS will
     use unless the packager provides their own.  This enables completely
     non-intrusive builds of eupspkg packages for repositories using standard
     build systems/options.
@@ -143,12 +143,12 @@ class Distrib(eupsDistrib.DefaultDistrib):
     colon). Secondly, note how the path has been enclosed in single quotes,
     to prevent variable expansion on the command line. Finally, although
     we've written it in lower case, the names of the variables passed in via
-    -S will be converted to upper case before being passed on to pkgbuild.
+    -S will be converted to upper case before being passed on to eupspkg.
 
     EUPS will construct a repository URL from each element of the path, and
     test for its existence until a matching one is found.  Instead of using
     matching via $REPOSITORY_PATH, the repository URL can be embedded into
-    the pkgbuild file itself by setting a variable named REPOSITORY.
+    the eupspkg file itself by setting a variable named REPOSITORY.
 
 
     In the context of package creation, the default create verb
@@ -182,8 +182,8 @@ class Distrib(eupsDistrib.DefaultDistrib):
     be passed to 'eups distrib create' via '-S' switch:
     
        source     -- define the content of $SOURCE to be passed to 
-                     'pkgbuild create' (default: "")
-       verbose    -- set $VERBOSE, to be passed to 'pkgbuild create'
+                     'eupspkg create' (default: "")
+       verbose    -- set $VERBOSE, to be passed to 'eupspkg create'
                      (default: same as EUPS verbosity level)
 
     The ability to define 'source' at package creation time is quite
@@ -206,7 +206,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
     command line to construct the package.  It saves any information needed
     to later build it (e.g., the $SHA1, or the resolved $REPOSITORY) to
     ./ups/pkginfo in the package itself.  To restore it, this file is
-    sourced by pkgbuild at 'eups distrib install' time.
+    sourced by eupspkg at 'eups distrib install' time.
     
 
     On install, the default verb implementations will try to detect the
@@ -235,7 +235,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
     library().
 
 
-    There are two ways of custimizing the pkgbuild scripts that use the
+    There are two ways of custimizing the eupspkg scripts that use the
     standard library: setting variables, or overriding defined functions.
     Unless the build process is complex, overriding the variables is usually
     sufficient to achieve the desired customization.
@@ -261,7 +261,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
        $PYSETUP_INSTALL_OPTIONS -- Options to pass to setup.py in install
                                    step. Default: --prefix $PREFIX.
 
-    The verbs themselves can also be overridden. For example, the pkgbuild
+    The verbs themselves can also be overridden. For example, the eupspkg
     file for Boost C++ library overrides the config verb as follows:
     
        ================================================================
@@ -291,8 +291,8 @@ class Distrib(eupsDistrib.DefaultDistrib):
 
     Debugging/Development support
 
-    To help with development of pkgbuild scripts, additional verbs are
-    provided by the default pkgbuild implementation:
+    To help with development of eupspkg scripts, additional verbs are
+    provided by the default eupspkg implementation:
     
        xcreate  -- create the package contents and place it into ./_create.
                    Must be invoked from the root product directory.
@@ -300,7 +300,7 @@ class Distrib(eupsDistrib.DefaultDistrib):
                    The output is stored in ./_fetch
        xclean   -- remove _create and _fetch directories.
 
-    The following options to pkgbuild are provided as well:
+    The following options to eupspkg are provided as well:
     
        -a             -- auto-detect the product name and version, using git.
                          The version will be a slightly mangled output of
@@ -314,24 +314,24 @@ class Distrib(eupsDistrib.DefaultDistrib):
     $EUPS_DIR/lib/eupspkg/functions will eval any arguments passed after the
     verb, enabling constructs such as:
     
-       ./ups/pkgbuild xcreate PRODUCT=... VERSION=...
+       ./ups/eupspkg xcreate PRODUCT=... VERSION=...
        
-    vs. 'env PRODUCT=... VERSION=... ./ups/pkgbuild xcreate'. Beware of
-    quoting issues when using this feature (eg.  pkgbuild xcreate
+    vs. 'env PRODUCT=... VERSION=... ./ups/eupspkg xcreate'. Beware of
+    quoting issues when using this feature (eg.  eupspkg xcreate
     REPOSITORY_PATH='.../$PRODUCT.git|.../$PRODUCT.git' will not do what you
     think it would, as the quotes will be expanded on the command line,
-    leaving pkgbuild to believe it's executing a pipe.
+    leaving eupspkg to believe it's executing a pipe.
 
-    Finally, there's a script named 'pkgbuild' in $EUPS_DIR/bin (and,
+    Finally, there's a script named 'eupspkg' in $EUPS_DIR/bin (and,
     therefore, on $PATH whenever eups is setup). It's a small wrapper that
-    dispatches the calls to ./ups/pkgbuild, if it exists, and to the default
+    dispatches the calls to ./ups/eupspkg, if it exists, and to the default
     EUPS-provided implementation otherwise. It allows the developer the
     conveninece to write:
     
-       pkgbuild -a xcreate
+       eupspkg -a xcreate
        
     in the root product directory and be confident it will work irrespective
-    of whether ./ups/pkgbuild or the default implementation is being used.
+    of whether ./ups/eupspkg or the default implementation is being used.
 
 
     Further Examples:
@@ -353,11 +353,11 @@ class Distrib(eupsDistrib.DefaultDistrib):
         self.nobuild = self.options.get("nobuild", False)
         self.noclean = self.options.get("noclean", False)
 
-        # Allow the verbosity of pkgbuild script to be set separately.
+        # Allow the verbosity of eupspkg script to be set separately.
 	if "verbose" not in self.options:
 		self.options["verbose"] = str(Eups.verbose)
 
-	# Prepare the string with all unrecognized options, to be passed to pkgbuild on the command line
+	# Prepare the string with all unrecognized options, to be passed to eupspkg on the command line
 	# FIXME: This is not the right way to do it. -S options should be preserved in a separate dict()
 	knownopts = set(['config', 'nobuild', 'noclean', 'noaction', 'exact', 'allowIncomplete', 'buildDir', 'noeups', 'installCurrent']);
         self.qopts = " ".join( "%s=%s" % (k.upper(), pipes.quote(str(v))) for k, v in self.options.iteritems() if k not in knownopts )
@@ -458,10 +458,10 @@ TAGLIST_DIR = tags
         serverDir = os.path.abspath(serverDir)
 
         (baseDir, productDir) = self.getProductInstDir(product, version, flavor)
-        pkgbuild = os.path.join(baseDir, productDir, "ups", "pkgbuild")
-        if not os.path.exists(pkgbuild):
+        eupspkg = os.path.join(baseDir, productDir, "ups", "eupspkg")
+        if not os.path.exists(eupspkg):
             # Use the defalt build file
-            pkgbuild = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg', 'pkgbuild.default')
+            eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.default')
 
         # Construct the package in a temporary directory
         pkgdir0 = tempfile.mkdtemp(suffix='.eupspkg')
@@ -471,9 +471,9 @@ TAGLIST_DIR = tags
 
         q = pipes.quote
         try:
-            # Execute 'pkgbuild <create>'
+            # Execute 'eupspkg <create>'
             cmd = ("cd %(pkgdir)s && " + \
-                "%(pkgbuild)s   PREFIX=%(prefix)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s %(qopts)s" + \
+                "%(eupspkg)s   PREFIX=%(prefix)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s %(qopts)s" + \
                 " create") % \
                     {
                       'pkgdir':   q(pkgdir),
@@ -481,7 +481,7 @@ TAGLIST_DIR = tags
                       'product':  q(product),
                       'version':  q(version),
                       'flavor':   q(flavor),
-                      'pkgbuild': q(pkgbuild),
+                      'eupspkg':  q(eupspkg),
                       'qopts':    self.qopts,
                     }
             eupsServer.system(cmd)
@@ -615,20 +615,20 @@ PKGDIR="$(find . -maxdepth 1 -type d ! -name ".*" | head -n 1)"
 test ! -z $PKGDIR
 cd "$PKGDIR"
 
-# If ./ups/pkgbuild is not present, symlink in the default
-if [[ ! -e ./ups/pkgbuild ]]; then
+# If ./ups/eupspkg is not present, symlink in the default
+if [[ ! -e ./ups/eupspkg ]]; then
 	mkdir -p ./ups
-	ln -s "$EUPS_DIR/lib/eupspkg/pkgbuild.default" ups/pkgbuild
+	ln -s "$EUPS_DIR/lib/eupspkg/eupspkg.default" ups/eupspkg
 fi
 
 # eups setup the dependencies
 %(setups)s
 
 # fetch package source
-( ./ups/pkgbuild %(qopts)s fetch ) || exit -1
+( ./ups/eupspkg %(qopts)s fetch ) || exit -1
 
 # prepare for build (eg., apply platform-specific patches)
-( ./ups/pkgbuild %(qopts)s prep  ) || exit -2
+( ./ups/eupspkg %(qopts)s prep  ) || exit -2
 
 # setup the package being built. note we're using -k
 # to ensure setup-ed dependencies aren't overridden by
@@ -638,9 +638,9 @@ fi
 setup --type=build -k -r .
 
 # configure, build, and install
-( ./ups/pkgbuild %(qopts)s config  ) || exit -3
-( ./ups/pkgbuild %(qopts)s build   ) || exit -4
-( ./ups/pkgbuild %(qopts)s install ) || exit -5
+( ./ups/eupspkg %(qopts)s config  ) || exit -3
+( ./ups/eupspkg %(qopts)s build   ) || exit -4
+( ./ups/eupspkg %(qopts)s install ) || exit -5
 """ 			% {
                         'buildDir' : q(buildDir),
                         'eupspkg' : q(tfname),
