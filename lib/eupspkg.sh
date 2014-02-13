@@ -1,11 +1,9 @@
-#!/bin/bash -- just to enable syntax highlighting --
+#!/bin/bash
 #
-# EupsPkg Distrib Mechanism Function Library
+# EupsPkg Distrib Mechanism Default Shell Implementation
 #
 # Defines utility functions, default implementations of eupspkg verbs, and
 # performs common initialization.
-#
-# Should be sourced early on in eupspkg scripts.
 #
 
 set -e
@@ -827,6 +825,10 @@ usage()   { _FUNCNAME=usage   default_usage "$@"; }
 
 ##################### ---- INITIALIZATION ---- #####################
 
+if [[ -f ./ups/eupspkg.sh ]]; then
+	export EUPSPKG_CONFIGS="$EUPSPKG_CONFIGS:$PWD/ups/eupspkg.sh"
+fi
+
 #
 # Parse command line options
 #
@@ -1006,7 +1008,7 @@ fi
 # the environment if not overridden on the command line or via pkginfo.
 #
 
-SITECUSTOMIZE=${SITECUSTOMIZE:-"$EUPSPKG_SITECUSTOMIZE"}		# ':'-delimited list of scripts to source at the end of this script. Used to mass-customize package creation.
+CONFIGS=${CONFIGS:-"$EUPSPKG_CONFIGS"}		# ':'-delimited list of scripts to source at the end of this script. Used to mass-customize package creation.
 
 NJOBS=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)   # number of cores on the machine (Darwin & Linux)
 
@@ -1036,17 +1038,20 @@ export CXX=${CXX:-c++}				# Autoconf prefers to look for gcc first, and the prop
 
 export SCONSFLAGS=${SCONSFLAGS:-"opt=3"}	# Default scons flags
 
-##################### ------ Hooks ----- #####################
+##################### ------ Overrides ----- #####################
 #
-# Source any files given via SITECUSTOMIZE/EUPSPKG_SITECUSTOMIZE
+# Source config/override files given via CONFIGS/EUPSPKG_CONFIGS
 #
-IFS=':' read -ra _SITECUSTOMIZE <<< "$SITECUSTOMIZE"
-for _script in "${_SITECUSTOMIZE[@]}"; do
+
+IFS=':' read -ra _CONFIGS <<< "$CONFIGS"
+for _script in "${_CONFIGS[@]}"; do
 	if [[ -f $_script ]]; then
-		debug "about to source '$_script'."
+		info "sourcing '$_script'."
 		. $_script
+	elif [[ -z $_script ]]; then
+		continue
 	else
-		die "script '$_script' listed on the SITECUSTOMIZE path does not exist."
+		die "script '$_script' listed on the CONFIGS path does not exist."
 	fi
 done
 
@@ -1060,3 +1065,8 @@ dumpvar debug NJOBS UPSTREAM_DIR PATCHES_DIR SOURCE REPOSITORY REPOSITORY_PATH M
 dumpvar debug PRODUCTS_ROOT PREFIX CONFIGURE_OPTIONS PYSETUP_INSTALL_OPTIONS
 dumpvar debug REPOVERSION SHA1
 dumpvar debug CC CXX SCONSFLAGS
+
+#
+# Run the commands
+#
+"$@"

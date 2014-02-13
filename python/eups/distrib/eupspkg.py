@@ -96,7 +96,7 @@ r"""
     (hereafter called $pkgdir).  There, a file named ./ups/eupspkg is
     searched for, and used to fetch, prepare, configure, build and install
     the product.  If the packager hasn't provided one, a default
-    implementation is used (residing in $EUPS_DIR/lib/eupspkg.default); it
+    implementation is used (residing in $EUPS_DIR/lib/eupspkg.sh); it
     knows how to build and install products using the most frequent build
     systems (e.g., autoconf, make, scons; see below for details).
 
@@ -759,7 +759,7 @@ TAGLIST_DIR = tags
         eupspkg = os.path.join(baseDir, productDir, "ups", "eupspkg")
         if not os.path.exists(eupspkg):
             # Use the defalt build file
-            eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.default')
+            eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.sh')
 
         # Construct the package in a temporary directory
         pkgdir0 = tempfile.mkdtemp(suffix='.eupspkg')
@@ -921,7 +921,7 @@ cd "$PKGDIR"
 # If ./ups/eupspkg is not present, symlink in the default
 if [[ ! -e ./ups/eupspkg ]]; then
     mkdir -p ./ups
-    ln -s "$EUPS_DIR/lib/eupspkg.default" ups/eupspkg
+    ln -s "$EUPS_DIR/lib/eupspkg.sh" ups/eupspkg
 fi
 
 # eups setup the dependencies
