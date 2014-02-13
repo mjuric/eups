@@ -831,7 +831,7 @@ usage()   { _FUNCNAME=usage   default_usage "$@"; }
 ##################### ---- INITIALIZATION ---- #####################
 
 if [[ -f ./ups/eupspkg.sh ]]; then
-	export EUPSPKG_CONFIGS="$EUPSPKG_CONFIGS:$PWD/ups/eupspkg.sh"
+	export EUPSPKG_SCRIPTS="$EUPSPKG_SCRIPTS:$PWD/ups/eupspkg.sh"
 fi
 
 #
@@ -1013,7 +1013,7 @@ fi
 # the environment if not overridden on the command line or via pkginfo.
 #
 
-CONFIGS=${CONFIGS:-"$EUPSPKG_CONFIGS"}		# ':'-delimited list of scripts to source at the end of this script. Used to mass-customize package creation.
+SCRIPTS=${SCRIPTS:-"$EUPSPKG_SCRIPTS"}		# ':'-delimited list of scripts to source at the end of this script. Used to mass-customize package creation.
 
 NJOBS=$((sysctl -n hw.ncpu || (test -r /proc/cpuinfo && grep processor /proc/cpuinfo | wc -l) || echo 2) 2>/dev/null)   # number of cores on the machine (Darwin & Linux)
 
@@ -1045,18 +1045,18 @@ export SCONSFLAGS=${SCONSFLAGS:-"opt=3"}	# Default scons flags
 
 ##################### ------ Overrides ----- #####################
 #
-# Source config/override files given via CONFIGS/EUPSPKG_CONFIGS
+# Source config/override files given via SCRIPTS/EUPSPKG_SCRIPTS
 #
 
-IFS=':' read -ra _CONFIGS <<< "$CONFIGS"
-for _script in "${_CONFIGS[@]}"; do
+IFS=':' read -ra _SCRIPTS <<< "$SCRIPTS"
+for _script in "${_SCRIPTS[@]}"; do
 	if [[ -f $_script ]]; then
 		info "sourcing '$_script'."
 		. $_script
 	elif [[ -z $_script ]]; then
 		continue
 	else
-		die "script '$_script' listed on the CONFIGS path does not exist."
+		die "script '$_script' listed on the SCRIPTS path does not exist."
 	fi
 done
 
