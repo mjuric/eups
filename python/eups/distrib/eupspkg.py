@@ -759,7 +759,7 @@ TAGLIST_DIR = tags
         eupspkg = os.path.join(baseDir, productDir, "ups", "eupspkg")
         if not os.path.exists(eupspkg):
             # Use the defalt build file
-            eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.sh')
+            eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.default')
 
         # Construct the package in a temporary directory
         pkgdir0 = tempfile.mkdtemp(suffix='.eupspkg')
@@ -921,7 +921,7 @@ cd "$PKGDIR"
 # If ./ups/eupspkg is not present, symlink in the default
 if [[ ! -e ./ups/eupspkg ]]; then
     mkdir -p ./ups
-    ln -s "$EUPS_DIR/lib/eupspkg.sh" ups/eupspkg
+    ln -s "$EUPS_DIR/lib/eupspkg.default" ups/eupspkg
 fi
 
 # eups setup the dependencies
