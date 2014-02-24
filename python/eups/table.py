@@ -1173,7 +1173,8 @@ def expandTableFile(Eups, ofd, ifd, productList, versionRegexp=None, force=False
 
         if logical:
             if not Eups.version_match(version, logical):
-                print >> utils.stdwarn, "Warning: %s %s failed to match condition \"%s\"" % (productName, version, logical)
+                # print >> utils.stdwarn, "Warning: %s %s failed to match condition \"%s\"" % (productName, version, logical)
+                pass
         else:
             if product and version and not re.search("^" + product.LocalVersionPrefix, version):
                 logical = ">= %s" % version
