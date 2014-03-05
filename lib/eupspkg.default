@@ -852,8 +852,8 @@ usage()   { _FUNCNAME=usage   default_usage "$@"; }
 
 ##################### ---- INITIALIZATION ---- #####################
 
-if [[ -f ./ups/eupspkg.sh ]]; then
-	export EUPSPKG_SCRIPTS="$EUPSPKG_SCRIPTS:$PWD/ups/eupspkg.sh"
+if [[ -f ./ups/eupspkg.cfg.sh ]]; then
+	export EUPSPKG_SCRIPTS="$EUPSPKG_SCRIPTS:$PWD/ups/eupspkg.cfg.sh"
 fi
 
 #
