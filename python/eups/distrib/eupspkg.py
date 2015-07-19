@@ -788,7 +788,6 @@ TAGLIST_DIR = tags
                                 previously existing distribution files even if Eups.force is false
         """
         distid = self.getDistIdForPackage(product, version)
-        distid = "eupspkg:%s-%s.eupspkg" % (product, version)
 
         # Make sure it's an absolute path
         serverDir = os.path.abspath(serverDir)
@@ -799,19 +798,32 @@ TAGLIST_DIR = tags
             # Use the defalt build file
             eupspkg = os.path.join(os.environ["EUPS_DIR"], 'lib', 'eupspkg.sh')
 
+        # packaging a binary or source?
+        binary_package = flavor is not None and flavor != 'generic'
+        if binary_package:
+            verb        = 'package'
+            productsDir = os.path.join(serverDir, "products", flavor)
+            tfn         = os.path.join(productsDir, "%s-%s.%s.eupspkg" % (product, version, flavor))
+            prodSubdir  = "%s" % (product)
+        else:
+            verb        = 'create'
+            productsDir = os.path.join(serverDir, "products")
+            tfn         = os.path.join(productsDir, "%s-%s.eupspkg" % (product, version))
+            prodSubdir  = "%s-%s" % (product, version)
+
         # Construct the package in a temporary directory
         pkgdir0 = tempfile.mkdtemp(suffix='.eupspkg')
-        prodSubdir = "%s-%s" % (product, version)
         pkgdir = os.path.join(pkgdir0, prodSubdir)
         os.mkdir(pkgdir)
 
         q = pipes.quote
         try:
-            # Execute 'eupspkg <create>'
+            # execute 'eupspkg <verb>'
             cmd = ("cd %(pkgdir)s && " + \
                 "%(eupspkg)s   PREFIX=%(prefix)s PRODUCT=%(product)s VERSION=%(version)s FLAVOR=%(flavor)s %(qopts)s" + \
-                " create") % \
+                " %(verb)s") % \
                     {
+                      'verb':     verb,
                       'pkgdir':   q(pkgdir),
                       'prefix':   q(os.path.join(baseDir, productDir)),
                       'product':  q(product),
@@ -820,17 +832,16 @@ TAGLIST_DIR = tags
                       'eupspkg':  q(eupspkg),
                       'qopts':    self.qopts,
                     }
+
             eupsServer.system(cmd)
 
-            # Tarball the result and copy it to $serverDir/products
-            productsDir = os.path.join(serverDir, "products")
+            # Tarball the result and copy it to $serverDir/products or $serverDir/products/<flavor> (for binaries)
             if not os.path.isdir(productsDir):
                 try:
                     os.makedirs(productsDir)
                 except:
                     raise RuntimeError, ("Failed to create %s" % (productsDir))
 
-            tfn = os.path.join(productsDir, "%s-%s.eupspkg" % (product, version))
             if os.path.exists(tfn) and not (overwrite or self.Eups.force):
                 if self.Eups.verbose > 1:
                     print >> self.log, "Not recreating", tfn

@@ -70,7 +70,7 @@ dumpvar()
 append_pkginfo()
 {
 	# Append VARNAME=VARVALUE line to pkginfo file
-	# Should only be used by the 'create' verb.
+	# Should only be used by the 'create' or 'package' verb.
 	#
 	# usage: append_pkginfo <VARNAME> [VARVALUE]
 	#
@@ -578,6 +578,52 @@ default_create()
 	msg "package contents created for '$PRODUCT-$VERSION', sources will be fetched via '$SOURCE'."
 }
 
+default_package()
+{
+	# Called to create the contents of a binary package.
+	#
+	# See the documentation for verb 'package' in eups.distrib.eupspkg
+	# module for details.
+	# --
+	# CWD: Called from the (empty) $pkgdir
+	# Env: Nothing guaranteed to be setup-ed
+	#
+
+	# safety: refuse to work in a non-empty directory. This will prevent
+	# chaos when careless users run eupspkg package in their source
+	# directories.
+	if [[ ! -z "$(ls -A)" ]]; then
+		die "safety first: refusing to run from a non-empty directory."
+	fi
+
+	# Make sure the important ones are here
+	die_if_empty PRODUCT
+	die_if_empty VERSION
+	die_if_empty FLAVOR
+	die_if_empty PREFIX
+
+	# Refuse to run if this is not our native platform
+	_OUR_FLAVOR=$(eups flavor)
+	if [[ "$_OUR_FLAVOR" != "$FLAVOR" ]]; then
+		die "Packaging for platform $FLAVOR not supported while running on $_OUR_FLAVOR."
+	fi
+
+	# Just copy the existing binary.
+	# FIXME: Add relocation fixups such as those found in conda/conda-build
+	mkdir "$VERSION" && cd "$VERSION"
+	(cd "$PREFIX" && tar cf - .) | (tar xf -)
+
+	# record the directory prefix under which the package was build as BUILD_PREFIX
+	PKGINFO="ups/pkginfo"
+	BUILD_PREFIX="$PREFIX"
+	append_pkginfo BUILD_PREFIX
+	append_pkginfo PRODUCT
+	append_pkginfo VERSION
+	append_pkginfo FLAVOR
+
+	msg "binary package prepared for '$PRODUCT-$VERSION',"
+}
+
 default_fetch()
 {
 	# Called in the 'eups distrib install' phase to obtain the source
@@ -901,6 +947,7 @@ EOF
 # Define default verb implementations
 #
 create()  { _FUNCNAME=create  default_create "$@"; }
+package() { _FUNCNAME=package default_package "$@"; }
 fetch()   { _FUNCNAME=fetch   default_fetch "$@"; }
 prep()    { _FUNCNAME=prep    default_prep "$@"; }
 config()  { _FUNCNAME=config  default_config "$@"; }
