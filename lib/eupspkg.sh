@@ -578,11 +578,11 @@ default_create()
 	msg "package contents created for '$PRODUCT-$VERSION', sources will be fetched via '$SOURCE'."
 }
 
-default_package()
+default_pack()
 {
 	# Called to create the contents of a binary package.
 	#
-	# See the documentation for verb 'package' in eups.distrib.eupspkg
+	# See the documentation for verb 'pack' in eups.distrib.eupspkg
 	# module for details.
 	# --
 	# CWD: Called from the (empty) $pkgdir
@@ -590,7 +590,7 @@ default_package()
 	#
 
 	# safety: refuse to work in a non-empty directory. This will prevent
-	# chaos when careless users run eupspkg package in their source
+	# chaos when careless users run eupspkg pack in their source
 	# directories.
 	if [[ ! -z "$(ls -A)" ]]; then
 		die "safety first: refusing to run from a non-empty directory."
@@ -610,7 +610,6 @@ default_package()
 
 	# Just copy the existing binary.
 	# FIXME: Add relocation fixups such as those found in conda/conda-build
-	mkdir "$VERSION" && cd "$VERSION"
 	(cd "$PREFIX" && tar cf - .) | (tar xf -)
 
 	# record the directory prefix under which the package was build as BUILD_PREFIX
@@ -621,7 +620,29 @@ default_package()
 	append_pkginfo VERSION
 	append_pkginfo FLAVOR
 
+	# Marker that this is a binary package
+	touch ups/.binary
+
 	msg "binary package prepared for '$PRODUCT-$VERSION',"
+}
+
+default_unpack()
+{
+	# Called in the 'eups distrib install' phase to install the binary
+	# distribution of the code.
+	#
+	# For details, see the documentation for verb 'unpack' in
+	# eups.distrib.eupspkg module docstring.
+	# --
+	# CWD: Called from $pkgdir
+	# Env: Called in environment with setup-ed dependencies, but not the product itself
+	#
+	
+	# Just copy everything into the destination directory
+	mkdir -p "$PREFIX"
+	(tar cf - .) | (cd "$PREFIX" && tar xf -)
+
+	msg "Installed the product into '$PREFIX' (from binary)"
 }
 
 default_fetch()
@@ -947,7 +968,8 @@ EOF
 # Define default verb implementations
 #
 create()  { _FUNCNAME=create  default_create "$@"; }
-package() { _FUNCNAME=package default_package "$@"; }
+pack()    { _FUNCNAME=package default_pack "$@"; }
+unpack()  { _FUNCNAME=package default_unpack "$@"; }
 fetch()   { _FUNCNAME=fetch   default_fetch "$@"; }
 prep()    { _FUNCNAME=prep    default_prep "$@"; }
 config()  { _FUNCNAME=config  default_config "$@"; }

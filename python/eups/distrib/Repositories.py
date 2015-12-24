@@ -331,6 +331,7 @@ class Repositories(object):
                     msg="Product %s %s not found in any package repository" % 
                         (product, version))
 
+        orig_version = version
         (product, version, flavor, pkgroot) = pkg
         productRoot = self.getInstallRoot()
         if productRoot is None:
@@ -348,6 +349,13 @@ class Repositories(object):
         man.remapEntries()              # allow user to rewrite entries in the manifest
         if product not in [p.product for p in man.getProducts()]:
             raise EupsException("You asked to install %s %s but it is not in the manifest\nCheck manifest.remap (see \"eups startup\") and/or increase the verbosity" % (product, version))
+
+        if isinstance(orig_version, Tag):
+            print "HERERERE", productRoot
+            self.eups.supportServerTags([orig_version], productRoot)
+            if alsoTag is None: alsoTag = []
+            alsoTag += [ orig_version ]
+            print "XXXXX---", product, alsoTag
 
         self._msgs = {}
         self._recursiveInstall(0, man, product, version, flavor, pkgroot, 

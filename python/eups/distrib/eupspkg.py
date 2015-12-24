@@ -727,8 +727,10 @@ class Distrib(eupsDistrib.DefaultDistrib):
             configcontents = """\
 # Configuration for a EupsPkg-based server
 DISTRIB_CLASS = eups.distrib.eupspkg.Distrib
+DISTRIB_SERVER_CLASS = eups.distrib.eupspkg.DistribServer
 EUPSPKG_URL = %(base)s/products/%(path)s
 LIST_URL = %(base)s/tags/%(tag)s.list
+LIST_FLAVOR_URL = %(base)s/tags/%(tag)s@%(flavor)s.list
 TAGLIST_DIR = tags
 """
             cf = open(config, 'a')
@@ -750,7 +752,13 @@ TAGLIST_DIR = tags
         @param flavor         the target flavor for this release.  An 
                                   implementation may ignore this variable.  
         """
-        return "tags/%s.list" % tag
+        if flavor == "generic":
+            flavor = None
+
+        if flavor is None:
+            return "tags/%s.list" % tag
+        else:
+            return "tags/%s@%s.list" % (tag, flavor)
 
     def getManifestPath(self, serverDir, product, version, flavor=None):
         """return the path where the manifest for a particular product will
@@ -771,8 +779,15 @@ TAGLIST_DIR = tags
                                 manifest.  This implementation ignores
                                 this parameter.
         """
-        return os.path.join(serverDir, "manifests", 
-                            "%s-%s.manifest" % (product, version))
+        if flavor == "generic":
+            flavor = None
+
+        if flavor is None:
+            return os.path.join(serverDir, "manifests", 
+                                "%s-%s.manifest" % (product, version))
+        else:
+            return os.path.join(serverDir, "manifests",
+                                "%s-%s@%s.manifest" % (product, version, flavor))
 
     def createPackage(self, serverDir, product, version, flavor=None, overwrite=False):
         """Write a package distribution into server directory tree and 
@@ -787,7 +802,7 @@ TAGLIST_DIR = tags
         @param overwrite      if True, this package will overwrite any 
                                 previously existing distribution files even if Eups.force is false
         """
-        distid = self.getDistIdForPackage(product, version)
+        distid = self.getDistIdForPackage(product, version, flavor)
 
         # Make sure it's an absolute path
         serverDir = os.path.abspath(serverDir)
@@ -801,10 +816,10 @@ TAGLIST_DIR = tags
         # packaging a binary or source?
         binary_package = flavor is not None and flavor != 'generic'
         if binary_package:
-            verb        = 'package'
-            productsDir = os.path.join(serverDir, "products", flavor)
-            tfn         = os.path.join(productsDir, "%s-%s.%s.eupspkg" % (product, version, flavor))
-            prodSubdir  = "%s" % (product)
+            verb        = 'pack'
+            productsDir = os.path.join(serverDir, "products")
+            tfn         = os.path.join(productsDir, "%s-%s@%s.eupspkg" % (product, version, flavor))
+            prodSubdir  = "%s-%s@%s" % (product, version, flavor)
         else:
             verb        = 'create'
             productsDir = os.path.join(serverDir, "products")
@@ -876,7 +891,13 @@ TAGLIST_DIR = tags
                                 that a non-flavor-specific ID is preferred, 
                                 if supported.
         """
-        return "eupspkg:%s-%s.eupspkg" % (product, version)
+        if flavor == "generic":
+            flavor = None
+
+        if flavor is None:
+            return "eupspkg:%s-%s.eupspkg" % (product, version)
+        else:
+            return "eupspkg:%s-%s@%s.eupspkg" % (product, version, flavor)
 
     def packageCreated(self, serverDir, product, version, flavor=None):
         """return True if a distribution package for a given product has 
@@ -911,6 +932,8 @@ TAGLIST_DIR = tags
                                to properly build this package.  This is usually
                                ignored by the pacman scripts.
         """
+
+        print "INSTALL:", location, product, version
 
         pkg = location
         if self.Eups.verbose >= 1:
@@ -987,23 +1010,29 @@ fi
 # show what we're running with (for the log file)
 eups list -s
 
-# fetch package source
-( ./ups/eupspkg %(qopts)s fetch ) || exit -1
+# binary or source build?
+if [[ ! -f ./ups/.binary ]]; then
+    # fetch package source
+    ( ./ups/eupspkg %(qopts)s fetch ) || exit -1
 
-# prepare for build (e.g., apply platform-specific patches)
-( ./ups/eupspkg %(qopts)s prep  ) || exit -2
+    # prepare for build (e.g., apply platform-specific patches)
+    ( ./ups/eupspkg %(qopts)s prep  ) || exit -2
 
-# setup the package being built. note we're using -k
-# to ensure setup-ed dependencies aren't overridden by
-# the table file. we could've used -j instead, but then
-# 'eups distrib install -j ...' installs would fail as 
-# these don't traverse and setup the dependencies.
-setup --type=build -k -r .
+    # setup the package being built. note we're using -k
+    # to ensure setup-ed dependencies aren't overridden by
+    # the table file. we could've used -j instead, but then
+    # 'eups distrib install -j ...' installs would fail as 
+    # these don't traverse and setup the dependencies.
+    setup --type=build -k -r .
 
-# configure, build, and install
-( ./ups/eupspkg %(qopts)s config  ) || exit -3
-( ./ups/eupspkg %(qopts)s build   ) || exit -4
-( ./ups/eupspkg %(qopts)s install ) || exit -5
+    # configure, build, and install
+    ( ./ups/eupspkg %(qopts)s config  ) || exit -3
+    ( ./ups/eupspkg %(qopts)s build   ) || exit -4
+    ( ./ups/eupspkg %(qopts)s install ) || exit -5
+else
+    # unpack the binary package
+    ( ./ups/eupspkg %(qopts)s unpack  ) || exit -6
+fi
 """                 % {
                         'buildDir' : q(buildDir),
                         'eupspkg' : q(tfname),
@@ -1061,3 +1090,82 @@ setup --type=build -k -r .
 
         if self.verbose > 0:
             print >> self.log, "Install for %s successfully completed" % pkg
+
+class DistribServer(eupsServer.ConfigurableDistribServer):
+    def __init__(self, *args, **kwargs):
+        super(DistribServer, self).__init__(*args, **kwargs)
+#        self.Eups = eups.Eups()
+#        # Working with real files from here on out
+#        assert self.base.startswith("dream:")
+#        self.base = self.base[len("dream:"):]
+#        
+#    def getFileForProduct(self, path, product, version, flavor, 
+#                          ftype=None, filename=None, noaction=False):
+#        if ftype is not None and ftype.lower() == "manifest":
+#            return self.getManifest(product, version, flavor, noaction=noaction)
+#
+#        if path is None or len(path) == 0:
+#            path = "%s.%s" % (product, ftype)
+#        elif version is not None:
+#            pv = "%s-%s" % (product, version)
+#            path = re.sub(pv, product, path)
+#        
+#        if ftype is not None and ftype == "build":
+#            if version is None:
+#                raise RuntimeError("Unspecified version for %s" % product)
+#            inBuild = open(os.path.join(self.base, path))
+#            if filename is None: filename = self.makeTempFile("dream_")
+#            outBuild = open(filename, "w")
+#            builderVars = eups.hooks.config.distrib["builder"]["variables"]
+#            expandBuildFile(outBuild, inBuild, product, version, self.verbose, builderVars)
+#            inBuild.close()
+#            outBuild.close()
+#            return filename
+#
+#        return self.getFile(path, flavor, ftype=ftype, filename=filename, noaction=noaction)
+#        
+#    def getManifest(self, product, version, flavor, noaction=False):
+#        if noaction:
+#            return Manifest()
+#
+#        if version is None:
+#            raise RuntimeError("Unspecified version for %s" % product)
+#
+#        tablefile = self.getTableFile(product, version, flavor)
+#        table = Table(tablefile)
+#        deps = table.dependencies(self.Eups, recursive=True)
+#        deps.reverse()
+#
+#        manifest = Manifest(product, version)
+#        for p, optional, depth in deps:
+#            if not optional or self.Eups.findProduct(p.name, p.version):
+#                manifest.addDependency(p.name, p.version, p.flavor, None, None, None, optional)
+#
+#        distId = "build:%s-%s.build" % (product, version)
+#        tableName = "%s.table" % product
+#        manifest.addDependency(product, version, flavor, tableName, os.path.join(product, version),
+#                               distId, False)
+#
+#        return manifest
+#
+#    def getTagNames(self, flavor=None, noaction=False):
+#        return list()
+#
+#    def getTagNamesFor(self, product, version, flavor="generic", tags=None, noaction=False):
+#        return list(), list()
+#
+#    def getTaggedProductList(self, tag="current", flavor=None, noaction=False):
+#        return list()
+#
+#    def listAvailableProducts(self, product=None, version=None, flavor=None,
+#                              tag=None, noaction=False):
+#        products = list()
+#        if tag is None and product is not None and version is not None:
+#            path = os.path.join(self.base, product)
+#            if os.path.exists(path + ".table") and os.path.exists(path + ".build"):
+#                products.append((product, version, flavor))
+#        return products
+#      
+#    def listFiles(self, path, flavor=None, tag=None, noaction=False):
+#        return list()
+

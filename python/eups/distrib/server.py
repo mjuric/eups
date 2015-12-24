@@ -105,9 +105,9 @@ class DistribServer(object):
         return the names of the tags supported by this server as a list.
 
         This implementation will discover what files of the form *.list 
-        are available on the server, where * is a tag name.  The flavor 
-        parameter is ignored.
+        are available on the server, where * is a tag name.
         """
+        print "------------", self.listFiles("", noaction)
         return map(lambda x: x[:-5], 
                    filter(lambda f: f.endswith(".list"), 
                           self.listFiles("", noaction)))
@@ -124,6 +124,7 @@ class DistribServer(object):
                              By providing this, one can remove the need to 
                              query the server for its list of supported tags.  
         """
+        print "GTNF:", flavor
         if tags is None:
             tags = self.getTagNames()
         if isinstance(tags, str):
@@ -167,6 +168,7 @@ class DistribServer(object):
         else:
             try:
                 file = self.getFile("", flavor, tag, "list", noaction=noaction)
+                print "XXXXXX", flavor, file, "\n--------\n", open(file).read(), "---------"
                 self.tagged[tag] = \
                     TaggedProductList.fromFile(file, tag, 
                                                verbosity=self.verbose-1,
@@ -246,6 +248,7 @@ class DistribServer(object):
         if flavor is not None and tag is not None:
             try:
                 for val in self.getTaggedProductList(tag, flavor).getProducts():
+                    print "HERE", val
                     if product and product != val[0]:
                         continue
                     if flavor == val[1]:
@@ -479,14 +482,20 @@ class ConfigurableDistribServer(DistribServer):
         DistribServer._initConfig_(self)
 
         # check for unrecognized keys in config files
-        for k in self.config.keys():
-            if not (k in self.validConfigKeys):
-                print >> self.log, "Invalid config parameter %s ignored" % k
+#        for k in self.config.keys():
+#            if not (k in self.validConfigKeys):
+#                print >> self.log, "Invalid config parameter %s ignored" % k
 
         if not self.config.has_key('MANIFEST_URL'):
             self.config['MANIFEST_URL'] = \
                 "%(base)s/manifests/%(product)s-%(version)s.manifest";
+        if not self.config.has_key('MANIFEST_FLAVOR_URL'):
+            self.config['MANIFEST_FLAVOR_URL'] = \
+                "%(base)s/manifests/%(product)s-%(version)s@%(flavor)s.manifest";
         if not self.config.has_key('TABLE_URL'):
+            self.config['TABLE_URL'] = \
+                "%(base)s/tables/%(product)s-%(version)s.table";
+        if not self.config.has_key('TABLE_FLAVOR_URL'):
             self.config['TABLE_URL'] = \
                 "%(base)s/tables/%(product)s-%(version)s.table";
         if not self.config.has_key('LIST_URL'):
@@ -502,7 +511,7 @@ class ConfigurableDistribServer(DistribServer):
             self.config['MANIFEST_DIR_URL'] = "%(base)s/manifests";
         if not self.config.has_key('MANIFEST_FILE_RE'):
             self.config['MANIFEST_FILE_RE'] = \
-                r"^(?P<product>[^\-\s]+)(-(?P<version>\S+))?" + \
+                r"^(?P<product>[^\-\s]+)(-(?P<version>[^@\s]+))?" + \
                 r"(@(?P<flavor>[^\-\s]+))?.manifest$"
 
         if self.getConfigProperty('PREFER_GENERIC', '').upper() == 'FALSE':
@@ -596,6 +605,8 @@ class ConfigurableDistribServer(DistribServer):
 
     def _fileViaTmpl8s(self, ftype, data, filename, noaction=False, 
                        ignoreMissingData=True):
+        print "DOWNLOAD:", ftype, data
+#        import traceback; traceback.print_stack()
         ftype = ftype.upper()
         if len(ftype) == 0 or not self.getConfigProperty("%s_URL" % ftype):
             return False
@@ -610,6 +621,7 @@ class ConfigurableDistribServer(DistribServer):
             else:
                 param = "%s_%s_URL" % (ftype, locations[i])
             tmpl = self.getConfigProperty(param, None)
+            print param, tmpl
 
             if tmpl is None:
                 if self.verbose > 2:
@@ -693,6 +705,7 @@ class ConfigurableDistribServer(DistribServer):
                (default: r"(?P<tag>[^\.]+)\.list$") to extract a tag name 
                (bylooking for a named group, "tag").  
         """
+#        import traceback; traceback.print_stack()
         out = self.getConfigProperty("AVAILABLE_TAGS")
         if out is not None:
             return out.split()
@@ -720,7 +733,8 @@ class ConfigurableDistribServer(DistribServer):
                 pass
 
         filere = self.getConfigProperty("TAGLIST_FILE_RE", 
-                                        r"^(?P<tag>[^\.]+)\.list$")
+                                        r"^(?P<tag>[^\.@]+)(@(?P<flavor>[^\-\s]+))?\.list$")
+        print "REGEX:", filere
         filere = re.compile(filere)
         src = self.getConfigProperty("TAGLIST_DIR", "") % data
 
@@ -737,9 +751,12 @@ class ConfigurableDistribServer(DistribServer):
             m = filere.search(file)
             if m is None: continue
             m = m.groupdict()
+            print "TAG:", m, flavor
             if m.has_key("tag") and m["tag"]:
-                out.append(m["tag"])
+                if flavor is None or m["flavor"] == flavor:
+                    out.append(m["tag"])
 
+        print "TAGS OUT:", out
         return out
 
     def listAvailableProducts(self, product=None, version=None, flavor=None,
