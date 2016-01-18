@@ -1,0 +1,19 @@
+language: python
+python:
+  - "2.7"
+
+install:
+  - test -f "$HOME/miniconda/.deployed" || ( rm -rf "$HOME/miniconda" && curl -L -O https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh && bash Miniconda-latest-Linux-x86_64.sh -b -p "$HOME/miniconda" && touch "$HOME/miniconda/.deployed")
+
+cache:
+  directories:
+  - $HOME/miniconda
+
+script:
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - ./configure --prefix=$HOME/eups --with-python=$(which python)
+  - make
+  - make install
+  - cd tests
+  - source $HOME/eups/bin/setups.sh
+  - python testAll.py
