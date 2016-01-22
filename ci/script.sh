@@ -27,6 +27,10 @@ make_and_install()
 # Python 2.7
 make_and_install
 
+# Python 2.6
+source activate py26
+make_and_install
+
 # Python 3.5
 source activate py35
 make_and_install
